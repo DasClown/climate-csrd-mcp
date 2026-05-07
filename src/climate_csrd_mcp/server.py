@@ -1,47 +1,46 @@
 """
 Climate CSRD MCP Server — Main entry point.
 
-Implements 5 MCP tools using FastMCP:
-  1. assess_climate_risk
-  2. get_emission_benchmarks
-  3. get_csrd_requirements
-  4. csrd_report
-  5. get_kfw_funding
-
-Usage:
-    climate-csrd-mcp              # starts stdio MCP server
-    climate-csrd-mcp --help       # show help
+Implements 14 MCP tools:
+  1. assess_climate_risk       — Physical climate risk (flood, heat, drought, storm, SLR, wildfire)
+  2. get_emission_benchmarks   — EU ETS + sector emission benchmarks
+  3. get_csrd_requirements     — ESRS/CSRD reporting obligations
+  4. csrd_report               — Full CSRD-compliant report module
+  5. get_kfw_funding           — KfW/BAFA funding programs
+  6. compare_sites             — Compare multiple locations side by side
+  7. get_carbon_forecast       — EU ETS carbon price projections
+  8. get_crrem_pathways        — CRREM real estate decarbonization pathways
+  9. get_supply_chain_risk     — Supply chain climate risk assessment
+  10. get_climate_synergy      — NDVI/frost/drought data (crop-mcp integration)
+  11. get_double_materiality   — ESRS double materiality assessment
+  12. get_financial_climate_risk — Financial impact of physical climate risks
+  13. get_insurance_estimate   — Business interruption insurance premium ranges
+  14. get_funding_check        — EU Taxonomy alignment + funding eligibility
 """
 
 import asyncio
 import logging
 import os
-import sys
-from datetime import date
 from typing import Any, Optional
 
 from dotenv import load_dotenv
-
 from mcp.server.fastmcp import FastMCP
 
 from .cache import get_cache
 from .utils import (
     aggregate_risk,
-    risk_label,
-    risk_color,
+    risk_label, risk_color,
     validate_coordinates,
-    CSRD_DISCLAIMER,
-    today_iso,
+    CSRD_DISCLAIMER, today_iso,
     get_esrs_ref,
+    weighted_aggregate_risk,
+    financial_risk_estimate,
+    insurance_premium_estimate,
+    supply_chain_risk_score,
+    map_double_materiality,
 )
-from .data_sources import (
-    copernicus as src_copernicus,
-    dwd as src_dwd,
-    eu_ets as src_eu_ets,
-    uba as src_uba,
-    eurlex as src_eurlex,
-    kfw as src_kfw,
-)
+from .data_sources import copernicus as src_cop, dwd as src_dwd, uba as src_uba
+from .data_sources import eu_ets as src_ets, eurlex as src_eurlex, kfw as src_kfw
 
 # ─── Load .env ───────────────────────────────────────────────────────
 load_dotenv()
@@ -52,547 +51,395 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ─── Create MCP Server ───────────────────────────────────────────────
-
 mcp = FastMCP(
     name="Climate CSRD Intelligence",
-    instructions="Klimarisiko-Analyse und CSRD-Berichterstattung — Copernicus + DWD + EU ETS + UBA + ESRS",
-    host="127.0.0.1",
-    port=8000,
+    instructions="Klimarisiko-Analyse und CSRD-Berichterstattung — Copernicus + DWD + EU ETS + UBA + ESRS + CRREM",
+    host="127.0.0.1", port=8000,
 )
 
-# ─── Tool 1: assess_climate_risk ─────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════
+# TOOL 1: assess_climate_risk (enhanced with storm, SLR, wildfire)
+# ═══════════════════════════════════════════════════════════════════════
 
 @mcp.tool(
     name="assess_climate_risk",
     description="Bewertet das physische Klimarisiko eines Standorts. "
-    "Kombiniert Copernicus-Hochwasser-Risikoklasse, DWD-Hitzetage-Prognose "
-    "und Dürre-Index zu einem Gesamt-Risikoscore (1-5).",
+    "Kombiniert Hochwasser, Hitze, Dürre, Sturm, Meeresspiegel, Waldbrand "
+    "zu einem gewichteten Gesamt-Risikoscore (1-5).",
 )
 async def assess_climate_risk(
-    lat: float,
-    lon: float,
-    location_name: str = "",
-    year_horizon: int = 2030,
+    lat: float, lon: float, location_name: str = "", year_horizon: int = 2030,
+    scenario: str = "rcp_4.5",
 ) -> dict[str, Any]:
-    """
-    Assess physical climate risk for a location.
-
-    Args:
-        lat: Latitude (-90 to 90)
-        lon: Longitude (-180 to 180)
-        location_name: Optional human-readable location name
-        year_horizon: Target year for projections (default: 2030)
-
-    Returns:
-        dict with flood risk, heat risk, drought index, overall score
-    """
     lat, lon = validate_coordinates(lat, lon)
     cache = get_cache()
-    cache_key = cache.make_key("climate", str(lat), str(lon), str(year_horizon))
-
-    # Check cache
+    cache_key = cache.make_key("climate_v2", str(lat), str(lon), str(year_horizon), scenario)
     cached = cache.get(cache_key)
     if cached:
-        logger.info(f"Cache HIT for {lat},{lon} ({location_name or 'unknown'})")
+        logger.info(f"Cache HIT for {lat},{lon}")
         return cached
 
-    logger.info(f"Computing climate risk for {lat},{lon} ({location_name or 'unknown'})")
+    logger.info(f"Computing climate risk for {lat},{lon} ({location_name})")
 
-    # Gather data from all sources in parallel
-    flood_task = src_copernicus.get_flood_risk(lat, lon)
-    drought_task = src_copernicus.get_drought_index(lat, lon)
-    heat_task = src_dwd.get_hot_day_projection(lat, lon, year_horizon)
-    climate_ref_task = src_dwd.get_climate_reference(lat, lon)
+    # Parallel data gathering — 10 sources
+    flood_t, drought_t, ndvi_t = src_cop.get_flood_risk(lat, lon), src_cop.get_drought_index(lat, lon), src_cop.get_ndvi(lat, lon)
+    storm_t, slr_t, frost_t = src_cop.get_storm_risk(lat, lon), src_cop.get_sea_level_rise_risk(lat, lon, year_horizon), src_cop.get_frost_risk(lat, lon)
+    fire_t = src_cop.get_wildfire_risk(lat, lon)
+    heat_t = src_dwd.get_hot_day_projection(lat, lon, year_horizon, scenario)
+    ref_t = src_dwd.get_climate_reference(lat, lon)
+    air_t = src_uba.get_air_quality(lat, lon)
 
-    flood_result, drought_result, heat_result, climate_ref = await asyncio.gather(
-        flood_task, drought_task, heat_task, climate_ref_task
+    flood_r, drought_r, ndvi_r, storm_r, slr_r, frost_r, fire_r, heat_r, ref_r, air_r = (
+        await asyncio.gather(flood_t, drought_t, ndvi_t, storm_t, slr_t, frost_t, fire_t, heat_t, ref_t, air_t)
     )
 
-    flood_risk = flood_result["risk_class"]
-    drought_risk = drought_result["risk_class"]
-    hot_days = heat_result["projected_hot_days_per_year"]
+    # Extract risk classes
+    flood = flood_r["risk_class"]
+    drought = drought_r["risk_class"]
+    heat_raw = heat_r.get("projected_hot_days_per_year", 15)
+    heat = min(heat_raw // 6 + 1, 5)
+    storm = storm_r.get("risk_class", 1)
+    sea_level = slr_r.get("risk_class", 1)
+    fire = fire_r.get("risk_class", 1)
 
-    # Heat risk class (based on hot days)
-    if hot_days <= 5:
-        heat_risk = 1
-    elif hot_days <= 10:
-        heat_risk = 2
-    elif hot_days <= 18:
-        heat_risk = 3
-    elif hot_days <= 28:
-        heat_risk = 4
-    else:
-        heat_risk = 5
+    # Weighted aggregate
+    scores_w = [(flood, 0.25), (drought, 0.20), (heat, 0.20), (storm, 0.12), (sea_level, 0.08), (fire, 0.15)]
+    weighted = weighted_aggregate_risk(scores_w)
+    total_score = weighted["score"]
 
-    # Overall risk
-    scores = [flood_risk, drought_risk, heat_risk]
-    overall = aggregate_risk(scores)
-
-    result: dict[str, Any] = {
-        "location": {
-            "name": location_name or f"{lat:.4f}, {lon:.4f}",
-            "lat": lat,
-            "lon": lon,
-            "year_horizon": year_horizon,
-        },
-        "flood_risk": {
-            "class": flood_risk,
-            "label": risk_label(flood_risk),
-            "color": risk_color(flood_risk),
-            "region": flood_result.get("region", ""),
-            "data_source": flood_result.get("data_source", "Copernicus EMS"),
-        },
-        "heat_risk": {
-            "class": heat_risk,
-            "label": risk_label(heat_risk),
-            "color": risk_color(heat_risk),
-            "projected_hot_days_per_year": hot_days,
-            "reference_city": heat_result.get("nearest_reference_city", ""),
-            "increase_vs_1961_1990": heat_result.get("increase_vs_baseline", 0),
-            "data_source": heat_result.get("data_source", "DWD CDC"),
-        },
-        "drought_risk": {
-            "class": drought_risk,
-            "label": risk_label(drought_risk),
-            "color": risk_color(drought_risk),
-            "trend": drought_result.get("trend", "stable"),
-            "region": drought_result.get("region", ""),
-            "data_source": drought_result.get("data_source", "EDO C3S"),
-        },
-        "climate_reference": {
-            "temperature_increase_c": climate_ref.get("warming_trend", {}).get("temperature_increase_c", 1.3),
-            "baseline_period": "1961-1990 vs 1991-2020",
-            "nearest_station": climate_ref.get("nearest_station", ""),
-            "data_source": "DWD CDC",
-        },
-        "overall_risk": {
-            "score": overall,
-            "label": risk_label(overall),
-            "color": risk_color(overall),
-            "components": scores,
-            "methodology": "Max-based aggregate, boost +1 if 3+ dimensions ≥ 3",
-        },
-        "disclaimer": (
-            "Diese Risikobewertung basiert auf öffentlichen Klimadaten (Copernicus, DWD, EEA). "
-            "Sie ersetzt keine standortspezifische Gefährdungsbeurteilung."
-        ),
+    result = {
+        "location": {"name": location_name or f"{lat:.4f}, {lon:.4f}", "lat": lat, "lon": lon, "year_horizon": year_horizon},
+        "flood_risk": {"class": flood, "label": risk_label(flood), "color": risk_color(flood),
+                        "is_coastal": flood_r.get("is_coastal", False), "data_source": flood_r.get("data_source", "")},
+        "heat_risk": {"class": heat, "label": risk_label(heat), "color": risk_color(heat),
+                       "projected_hot_days_per_year": heat_raw, "scenario": scenario,
+                       "data_source": heat_r.get("data_source", "")},
+        "drought_risk": {"class": drought, "label": risk_label(drought), "color": risk_color(drought),
+                          "trend": drought_r.get("trend", "stable"), "data_source": drought_r.get("data_source", "")},
+        "storm_risk": {"class": storm, "label": risk_label(storm), "color": risk_color(storm),
+                        "zone": storm_r.get("zone", ""), "data_source": storm_r.get("data_source", "")},
+        "sea_level_rise_risk": {"class": sea_level, "label": risk_label(sea_level), "color": risk_color(sea_level),
+                                 "rise_cm": slr_r.get("sea_level_rise_cm", 0), "data_source": slr_r.get("data_source", "")},
+        "wildfire_risk": {"class": fire, "label": risk_label(fire), "color": risk_color(fire),
+                           "data_source": fire_r.get("data_source", "")},
+        "frost_risk": {"class": frost_r["risk_class"], "label": risk_label(frost_r["risk_class"]),
+                        "frost_days": frost_r.get("estimated_frost_days_per_year", 0)},
+        "ndvi": ndvi_r["ndvi"],
+        "air_quality": {"luq": air_r.get("luq_index", 0), "pm10": air_r.get("pm10_annual_mean_ugm3", 0)},
+        "climate_reference": {"temperature_increase_c": ref_r.get("warming_trend", {}).get("temperature_increase_c", 1.3),
+                               "nearest_station": ref_r.get("nearest_station", "")},
+        "overall_risk": {"score": total_score, "label": risk_label(total_score), "color": risk_color(total_score),
+                          "weighted_detail": weighted, "methodology": "Weighted 6-dimension model"},
     }
-
-    # Cache for 30 days (climate data doesn't change daily)
     cache.set(cache_key, result, category="climate")
     return result
 
+# ═══════════════════════════════════════════════════════════════════════
+# TOOL 2: compare_sites
+# ═══════════════════════════════════════════════════════════════════════
 
-# ─── Tool 2: get_emission_benchmarks ─────────────────────────────────
+@mcp.tool(
+    name="compare_sites",
+    description="Vergleicht mehrere Standorte hinsichtlich ihres physischen Klimarisikos. "
+    "Gibt eine Side-by-Side-Analyse mit Ranking aus.",
+)
+async def compare_sites(
+    sites: list[dict],
+    year_horizon: int = 2030,
+) -> list[dict[str, Any]]:
+    results = await asyncio.gather(*[
+        assess_climate_risk(s["lat"], s["lon"], s.get("name", ""), year_horizon)
+        for s in sites
+    ])
+    ranked = sorted(results, key=lambda r: r["overall_risk"]["score"], reverse=True)
+    comparisons = []
+    for i, r in enumerate(ranked, 1):
+        comparisons.append({
+            "rank": i,
+            "name": r["location"]["name"],
+            "overall_score": r["overall_risk"]["score"],
+            "overall_label": r["overall_risk"]["label"],
+            "flood": r["flood_risk"]["class"],
+            "heat": r["heat_risk"]["class"],
+            "drought": r["drought_risk"]["class"],
+            "storm": r["storm_risk"]["class"],
+            "sea_level_rise": r["sea_level_rise_risk"]["class"],
+            "wildfire": r["wildfire_risk"]["class"],
+            "detail": r,
+        })
+    return comparisons
+
+# ═══════════════════════════════════════════════════════════════════════
+# TOOL 3: get_emission_benchmarks
+# ═══════════════════════════════════════════════════════════════════════
 
 @mcp.tool(
     name="get_emission_benchmarks",
     description="Holt Branchen-Emissionsbenchmarks aus dem EU ETS "
     "und der EEA-Datenbank. Liefert Durchschnitt, Top/Bottom 10% und Trend.",
 )
-async def get_emission_benchmarks(
-    sector: str,
-    region: str = "EU",
-) -> dict[str, Any]:
-    """
-    Get emission benchmarks for a sector.
-
-    Args:
-        sector: Sector name (e.g., 'cement', 'steel', 'manufacturing')
-        region: Geographic scope (default: 'EU')
-
-    Returns:
-        dict with benchmark data
-    """
+async def get_emission_benchmarks(sector: str, region: str = "EU") -> dict[str, Any]:
     cache = get_cache()
     cache_key = cache.make_key("benchmarks", sector, region)
-
     cached = cache.get(cache_key)
     if cached:
         return cached
-
-    # Try EU ETS benchmark first (industrial sectors)
-    ets_result = await src_eu_ets.get_ets_benchmark(sector, region)
-    if "error" not in ets_result:
-        result = {
-            "type": "eu_ets_benchmark",
-            "sector": sector,
-            "region": region,
-            "data": ets_result,
-            "data_source": "EU ETS Phase IV, EC 2021/447",
-        }
+    ets = await src_ets.get_ets_benchmark(sector, region)
+    if "error" not in ets:
+        result = {"type": "eu_ets_benchmark", "sector": sector, "data": ets}
         cache.set(cache_key, result, category="emissions")
         return result
-
-    # Fall back to economy-wide intensity
-    intensity = await src_eu_ets.get_sector_emission_intensity(sector, region)
+    intensity = await src_ets.get_sector_emission_intensity(sector, region)
     if "error" not in intensity:
-        result = {
-            "type": "sector_emission_intensity",
-            "sector": sector,
-            "region": region,
-            "data": intensity,
-            "data_source": "EEA GHG Inventory + Eurostat 2024",
-        }
+        result = {"type": "sector_emission_intensity", "sector": sector, "data": intensity}
         cache.set(cache_key, result, category="emissions")
         return result
+    return {"error": f"Unknown sector: {sector}"}
 
-    # Sector not found
-    return {
-        "error": f"Unbekannter Sektor: '{sector}'",
-        "available_ets_sectors": [
-            "power_generation", "cement", "steel", "refineries",
-            "chemicals", "pulp_paper", "glass", "ceramics", "aviation",
-        ],
-        "available_economy_sectors": [
-            "manufacturing", "energy", "construction", "transport",
-            "agriculture", "real_estate", "finance", "technology", "retail",
-        ],
-    }
-
-
-# ─── Tool 3: get_csrd_requirements ───────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════
+# TOOL 4: get_csrd_requirements
+# ═══════════════════════════════════════════════════════════════════════
 
 @mcp.tool(
     name="get_csrd_requirements",
-    description="Ermittelt welche ESRS-Offenlegungspflichten für ein "
-    "Unternehmen gelten. Basiert auf CSRD-Schwellenwerten (Art. 3), "
-    "Sektor-Materialität und Unternehmensgröße.",
+    description="Ermittelt ESRS-Offenlegungspflichten nach CSRD. "
+    "Basiert auf Art. 3, Sektor-Materialität und Unternehmensgröße.",
 )
 async def get_csrd_requirements(
-    entity_type: str = "large",
-    sector: str = "manufacturing",
-    employees: int = 500,
-    revenue: float = 100.0,
+    entity_type: str = "large", sector: str = "manufacturing",
+    employees: int = 500, revenue: float = 100.0,
 ) -> dict[str, Any]:
-    """
-    Get CSRD/ESRS reporting requirements for an entity.
-
-    Args:
-        entity_type: 'large', 'listed_sme', or 'non_eu_group'
-        sector: Business sector
-        employees: Number of employees
-        revenue: Annual revenue in €M
-
-    Returns:
-        dict with applicable ESRS standards
-    """
     cache = get_cache()
     cache_key = cache.make_key("csrd", entity_type, sector, str(employees), str(revenue))
-
     cached = cache.get(cache_key)
     if cached:
         return cached
-
-    result = await src_eurlex.get_csrd_requirements(
-        entity_type=entity_type,
-        sector=sector,
-        employees=employees,
-        revenue=revenue,
-    )
-
+    result = await src_eurlex.get_csrd_requirements(entity_type=entity_type, sector=sector, employees=employees, revenue=revenue)
     result["disclaimer"] = CSRD_DISCLAIMER
-
     cache.set(cache_key, result, category="csrd")
     return result
 
-
-# ─── Tool 4: csrd_report ─────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════
+# TOOL 5: csrd_report
+# ═══════════════════════════════════════════════════════════════════════
 
 @mcp.tool(
     name="csrd_report",
     description="Erstellt einen CSRD-konformen Berichtsbaustein für "
-    "einen Standort. Enthält physische Risikoanalyse, Emissionsbenchmark "
-    "und ESRS-Referenzen. Finale Prüfung durch das Unternehmen erforderlich.",
+    "einen Standort inkl. Risikoanalyse, Emissionsbenchmark und ESRS-Matrix.",
 )
 async def csrd_report(
-    lat: float,
-    lon: float,
-    sector: str,
-    company_name: str = "",
-    site_name: str = "",
-    employees: int = 500,
-    revenue: float = 100.0,
-    year_horizon: int = 2030,
-    entity_type: str = "large",
+    lat: float, lon: float, sector: str,
+    company_name: str = "", site_name: str = "",
+    employees: int = 500, revenue: float = 100.0,
+    year_horizon: int = 2030, entity_type: str = "large",
     own_emission_intensity: Optional[float] = None,
 ) -> dict[str, Any]:
-    """
-    Generate a CSRD-compliant report module for a location.
+    risk_data = await assess_climate_risk(lat, lon, site_name or company_name, year_horizon)
+    csrd_data = await get_csrd_requirements(entity_type, sector, employees, revenue)
+    bench_data = await get_emission_benchmarks(sector)
 
-    Args:
-        lat: Latitude
-        lon: Longitude
-        sector: Business sector
-        company_name: Optional company name
-        site_name: Optional site name
-        employees: Number of employees
-        revenue: Annual revenue in €M
-        year_horizon: Target year for projections
-        entity_type: 'large', 'listed_sme', or 'non_eu_group'
-        own_emission_intensity: Optional company-specific emission intensity
-
-    Returns:
-        Comprehensive CSRD report module
-    """
-    # Gather all data in parallel
-    risk_task = assess_climate_risk(lat, lon, site_name or company_name, year_horizon)
-    csrd_task = get_csrd_requirements(entity_type, sector, employees, revenue)
-    bench_task = get_emission_benchmarks(sector)
-
-    risk_data, csrd_data, bench_data = await asyncio.gather(
-        risk_task, csrd_task, bench_task
-    )
-
-    # Get location-specific ESRS triggers
     flood_risk = risk_data["flood_risk"]["class"]
     hot_days = risk_data["heat_risk"]["projected_hot_days_per_year"]
     drought_risk = risk_data["drought_risk"]["class"]
+    location_triggers = await src_eurlex.get_location_specific_triggers(flood_risk=flood_risk, hot_days=hot_days, drought_index=drought_risk)
 
-    location_triggers = await src_eurlex.get_location_specific_triggers(
-        flood_risk=flood_risk,
-        hot_days=hot_days,
-        drought_index=drought_risk,
-    )
-
-    # Build ESRS applicability matrix
-    esrs_applicable = []
+    esrs_entries = []
     for std in csrd_data.get("all_applicable_standards", []):
-        ref = get_esrs_ref(std)
-        is_core = std in csrd_data.get("core_mandatory_standards", [])
-        esrs_applicable.append({
-            "standard": std,
-            "title": ref,
-            "mandatory": is_core,
-            "location_triggered": False,
-        })
+        esrs_entries.append({"standard": std, "title": get_esrs_ref(std), "mandatory": std in csrd_data.get("core_mandatory_standards", []), "location_triggered": False})
+    for t in location_triggers:
+        for req in t.get("requirements", []):
+            esrs_entries.append({"standard": req, "title": req, "mandatory": False, "location_triggered": True, "trigger_reason": t.get("trigger", "")})
 
-    for trigger in location_triggers:
-        for req in trigger.get("requirements", []):
-            esrs_applicable.append({
-                "standard": req,
-                "title": req,
-                "mandatory": False,
-                "location_triggered": True,
-                "trigger_reason": trigger.get("trigger", ""),
-                "trigger_severity": trigger.get("severity", 0),
-            })
-
-    # Benchmark comparison
     comparison = None
     if own_emission_intensity is not None:
         avg = bench_data.get("data", {}).get("average", 0)
         if avg:
-            pct_diff = ((own_emission_intensity - avg) / avg) * 100
-            comparison = {
-                "own_intensity": own_emission_intensity,
-                "sector_average": avg,
-                "unit": bench_data.get("data", {}).get("unit", "t CO₂e/€M"),
-                "difference_pct": round(pct_diff, 1),
-                "status": "above_average" if pct_diff > 0 else "below_average",
-                "top_10_pct_threshold": bench_data.get("data", {}).get("top_10_pct"),
-                "bottom_10_pct_threshold": bench_data.get("data", {}).get("bottom_10_pct"),
-            }
+            pct = ((own_emission_intensity - avg) / avg) * 100
+            comparison = {"own_intensity": own_emission_intensity, "sector_average": avg, "difference_pct": round(pct, 1), "status": "above_average" if pct > 0 else "below_average"}
 
-    report = {
-        "report_metadata": {
-            "generated_at": today_iso(),
-            "company": company_name or "N/A",
-            "site": site_name or f"{lat:.4f}, {lon:.4f}",
-            "sector": sector,
-            "entity_type": entity_type,
-        },
+    return {
+        "report_metadata": {"generated_at": today_iso(), "company": company_name, "site": site_name or f"{lat:.4f},{lon:.4f}", "sector": sector},
         "physical_climate_risk": risk_data,
         "emission_benchmarks": bench_data,
         "benchmark_comparison": comparison,
-        "csrd_applicability": {
-            "entity_classification": csrd_data.get("classification", ""),
-            "first_reporting_deadline": csrd_data.get("first_reporting", "N/A"),
-            "core_mandatory": csrd_data.get("core_mandatory_standards", []),
-            "sector_material_topics": csrd_data.get("sector_material_topics", []),
-        },
-        "esrs_applicability_matrix": esrs_applicable,
+        "csrd_applicability": {"entity_classification": csrd_data.get("classification", ""), "first_reporting": csrd_data.get("first_reporting", ""), "core_mandatory": csrd_data.get("core_mandatory_standards", [])},
+        "esrs_applicability_matrix": esrs_entries,
         "location_specific_triggers": location_triggers,
-        "recommendations": _generate_recommendations(
-            overall_risk=risk_data["overall_risk"]["score"],
-            flood_risk=flood_risk,
-            heat_risk=risk_data["heat_risk"]["class"],
-            drought_risk=drought_risk,
-            sector=sector,
-        ),
+        "recommendations": _recs(risk_data["overall_risk"]["score"], flood_risk, risk_data["heat_risk"]["class"], drought_risk, sector),
         "disclaimer": CSRD_DISCLAIMER,
     }
 
-    return report
-
-
-def _generate_recommendations(
-    overall_risk: int,
-    flood_risk: int,
-    heat_risk: int,
-    drought_risk: int,
-    sector: str,
-) -> list[dict]:
-    """Generate actionable recommendations based on risk profile."""
+def _recs(overall, flood, heat, drought, sector):
     recs = []
+    if flood >= 4: recs.append({"priority": "high", "area": "flood", "esrs_ref": "E1-7"})
+    elif flood >= 3: recs.append({"priority": "medium", "area": "flood"})
+    if heat >= 4: recs.append({"priority": "high", "area": "heat", "esrs_ref": "E1-2, S1-8"})
+    if drought >= 4: recs.append({"priority": "high", "area": "water", "esrs_ref": "E3-1, E3-3"})
+    if overall >= 4: recs.append({"priority": "high", "area": "adaptation_strategy", "esrs_ref": "E1-1, E1-7"})
+    return recs or [{"priority": "low", "area": "monitoring", "esrs_ref": "E1-2"}]
 
-    if flood_risk >= 4:
-        recs.append({
-            "priority": "high",
-            "area": "flood_protection",
-            "recommendation": "Hochwasserschutzmaßnahmen prüfen: mobile Barrieren, "
-                "Rückhaltebecken, wasserdichte Lagerung kritischer Betriebsmittel.",
-            "esrs_ref": "E1-7, E4-3",
-            "kfw_programs": ["KfW 441"],
-        })
-    elif flood_risk >= 3:
-        recs.append({
-            "priority": "medium",
-            "area": "flood_protection",
-            "recommendation": "Hochwasser-Risikoanalyse für Standort durchführen, "
-                "Versicherungsschutz prüfen, Notfallpläne erstellen.",
-            "esrs_ref": "E1-7",
-            "kfw_programs": ["KfW 441"],
-        })
-
-    if heat_risk >= 4:
-        recs.append({
-            "priority": "high",
-            "area": "heat_adaptation",
-            "recommendation": "Hitzeschutz für Mitarbeiter (S1): Kühlräume, "
-                "flexible Arbeitszeiten, Dach- und Fassadenbegrünung. "
-                "Klimatisierung auf erneuerbare Energien umstellen.",
-            "esrs_ref": "E1-2, E1-3, S1-8",
-            "kfw_programs": ["KfW 290", "BAFA-EW"],
-        })
-    elif heat_risk >= 3:
-        recs.append({
-            "priority": "medium",
-            "area": "heat_adaptation",
-            "recommendation": "Hitzestress-Risikobewertung durchführen, "
-                "Grünflächenanteil prüfen, Verschattungskonzept entwickeln.",
-            "esrs_ref": "E1-7, S1-8",
-            "kfw_programs": ["KfW 441"],
-        })
-
-    if drought_risk >= 4:
-        recs.append({
-            "priority": "high",
-            "area": "water_management",
-            "recommendation": "Wassermanagement-System implementieren: "
-                "Regenwassernutzung, Kreislaufführung, wassersparende Technologien. "
-                "Wasserentnahme genehmigen lassen (UBA).",
-            "esrs_ref": "E3-1, E3-3, E3-4",
-            "kfw_programs": ["KfW 441", "KfW 290"],
-        })
-    elif drought_risk >= 3:
-        recs.append({
-            "priority": "medium",
-            "area": "water_management",
-            "recommendation": "Wasserfußabdruck analysieren, "
-                "Wasser-Effizienzmaßnahmen identifizieren, "
-                "Risiko von Entnahmebeschränkungen bewerten.",
-            "esrs_ref": "E3-1, E3-3",
-            "kfw_programs": ["KfW 290"],
-        })
-
-    if overall_risk >= 4:
-        recs.append({
-            "priority": "high",
-            "area": "climate_adaptation_strategy",
-            "recommendation": "Standort-spezifische Klimaanpassungsstrategie "
-                "entwickeln. ERM (Enterprise Risk Management) um physische "
-                "Klimarisiken erweitern. Offenlegung nach ESRS E1-7 sicherstellen.",
-            "esrs_ref": "E1-1, E1-2, E1-7",
-            "kfw_programs": ["KfW 441", "BAFA-EBW"],
-        })
-
-    # Sector-specific
-    if sector == "manufacturing" and overall_risk >= 3:
-        recs.append({
-            "priority": "medium",
-            "area": "supply_chain_resilience",
-            "recommendation": "Lieferketten-Resilienz prüfen: "
-                "Klimarisiken in der Wertschöpfungskette identifizieren "
-                "(ESRS S2, E1-7).",
-            "esrs_ref": "E1-7, S2",
-            "kfw_programs": [],
-        })
-
-    if not recs:
-        recs.append({
-            "priority": "low",
-            "area": "monitoring",
-            "recommendation": "Klimarisiko-Monitoring etablieren. "
-                "Jährliche Aktualisierung der Risikobewertung.",
-            "esrs_ref": "E1-2",
-            "kfw_programs": [],
-        })
-
-    return recs
-
-
-# ─── Tool 5: get_kfw_funding ─────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════
+# TOOL 6: get_kfw_funding
+# ═══════════════════════════════════════════════════════════════════════
 
 @mcp.tool(
     name="get_kfw_funding",
-    description="Findet passende KfW- und BAFA-Förderprogramme für "
-    "Klimaschutz- und Anpassungsmaßnahmen an einem Standort.",
+    description="Findet KfW- und BAFA-Förderprogramme für Klimaschutz- und Anpassungsmaßnahmen.",
 )
-async def get_kfw_funding(
-    standort_art: str = "produktion",
-    sector: str = "manufacturing",
-    measure: str = "energy_efficiency",
-) -> dict[str, Any]:
-    """
-    Find matching KfW/BAFA funding programs.
-
-    Args:
-        standort_art: Standort-Typ (produktion, buero, logistik, landwirtschaft, etc.)
-        sector: Wirtschaftssektor
-        measure: Maßnahmenart (energy_efficiency, renewable_energy, flood_protection, etc.)
-
-    Returns:
-        dict with matching programs
-    """
+async def get_kfw_funding(standort_art: str = "produktion", sector: str = "manufacturing", measure: str = "energy_efficiency") -> dict[str, Any]:
     cache = get_cache()
     cache_key = cache.make_key("kfw", standort_art, sector, measure)
-
     cached = cache.get(cache_key)
     if cached:
         return cached
-
-    programs = await src_kfw.get_funding_programs(
-        standort_art=standort_art,
-        sector=sector,
-        measure=measure,
-    )
-
-    result = {
-        "standort_art": standort_art,
-        "sector": sector,
-        "measure": measure,
-        "matching_programs": programs,
-        "program_count": len(programs),
-        "data_source": "KfW Bankengruppe / BAFA, Stand 2025",
-        "disclaimer": (
-            "Förderprogramme können sich ändern. Vor Antragstellung "
-            "die aktuellen Konditionen auf www.kfw.de bzw. www.bafa.de prüfen."
-        ),
-    }
-
+    programs = await src_kfw.get_funding_programs(standort_art=standort_art, sector=sector, measure=measure)
+    result = {"standort_art": standort_art, "sector": sector, "measure": measure, "matching_programs": programs, "program_count": len(programs)}
     cache.set(cache_key, result, category="kfw")
     return result
 
+# ═══════════════════════════════════════════════════════════════════════
+# TOOL 7: get_carbon_forecast
+# ═══════════════════════════════════════════════════════════════════════
 
-# ─── Entry Point ──────────────────────────────────────────────────────
+@mcp.tool(
+    name="get_carbon_forecast",
+    description="EU ETS Kohlenstoffpreis-Prognose 2025-2040. "
+    "Enthält Jahresprojektionen (min/max/central), Szenarien und Quellen.",
+)
+async def get_carbon_forecast() -> dict[str, Any]:
+    return await src_ets.get_carbon_price_forecast()
+
+# ═══════════════════════════════════════════════════════════════════════
+# TOOL 8: get_crrem_pathways
+# ═══════════════════════════════════════════════════════════════════════
+
+@mcp.tool(
+    name="get_crrem_pathways",
+    description="CRREM Dekarbonisierungspfade für Immobilien. "
+    "Unterstützt 5 Asset-Typen (office, retail, residential, logistics, hotel) "
+    "in 15 EU-Ländern mit 3 Szenarien.",
+)
+async def get_crrem_pathways(
+    asset_type: str = "office", country: str = "DE",
+    target_year: int = 2030, scenario: str = "1.5c",
+    current_intensity: Optional[float] = None,
+) -> dict[str, Any]:
+    from .data_sources.crrem import get_crrem_pathway, get_crrem_stranding_risk
+    pathway = await get_crrem_pathway(asset_type, country, target_year, scenario)
+    if current_intensity is not None:
+        stranding = await get_crrem_stranding_risk(asset_type, country, current_intensity, target_year)
+        pathway["stranding_risk"] = stranding
+    return pathway
+
+# ═══════════════════════════════════════════════════════════════════════
+# TOOL 9: get_supply_chain_risk
+# ═══════════════════════════════════════════════════════════════════════
+
+@mcp.tool(
+    name="get_supply_chain_risk",
+    description="Bewertet Klimarisiken in der Lieferkette basierend "
+    "auf Sektoren und Regionen der Lieferanten.",
+)
+async def get_supply_chain_risk(
+    sectors: list[str],
+    regions: list[str],
+) -> dict[str, Any]:
+    return supply_chain_risk_score(sectors, regions)
+
+# ═══════════════════════════════════════════════════════════════════════
+# TOOL 10: get_climate_synergy
+# ═══════════════════════════════════════════════════════════════════════
+
+@mcp.tool(
+    name="get_climate_synergy",
+    description="Liefert NDVI, Dürre- und Frostdaten für landwirtschaftliche "
+    "Anwendungen (crop-mcp Integration). Growing Season Quality Index.",
+)
+async def get_climate_synergy(lat: float, lon: float) -> dict[str, Any]:
+    syn = await src_cop.get_climate_synergy_data(lat, lon)
+    syn["crop_mcp_ready"] = True
+    return syn
+
+# ═══════════════════════════════════════════════════════════════════════
+# TOOL 11: get_double_materiality
+# ═══════════════════════════════════════════════════════════════════════
+
+@mcp.tool(
+    name="get_double_materiality",
+    description="ESRS Double Materiality Assessment. "
+    "Ermittelt Impact- und Financial-Materiality für einen Sektor "
+    "unter Berücksichtigung von Standortrisiken.",
+)
+async def get_double_materiality(
+    sector: str = "manufacturing",
+    location_risks: Optional[dict[str, int]] = None,
+) -> dict[str, Any]:
+    return map_double_materiality(sector, location_risks or {})
+
+# ═══════════════════════════════════════════════════════════════════════
+# TOOL 12: get_financial_climate_risk
+# ═══════════════════════════════════════════════════════════════════════
+
+@mcp.tool(
+    name="get_financial_climate_risk",
+    description="Schätzt die finanziellen Auswirkungen von physischen "
+    "Klimarisiken basierend auf Risikoscore, Sektor und Umsatz.",
+)
+async def get_financial_climate_risk(
+    overall_risk: int, sector: str = "manufacturing",
+    annual_revenue_eur_m: float = 100.0,
+) -> dict[str, Any]:
+    return financial_risk_estimate(overall_risk, sector, annual_revenue_eur_m)
+
+# ═══════════════════════════════════════════════════════════════════════
+# TOOL 13: get_insurance_estimate
+# ═══════════════════════════════════════════════════════════════════════
+
+@mcp.tool(
+    name="get_insurance_estimate",
+    description="Schätzt die Kosten für Betriebsunterbrechungs-"
+    "Versicherung basierend auf Standortrisiko und Branche.",
+)
+async def get_insurance_estimate(
+    lat: float, lon: float,
+    overall_risk: int, sector: str = "manufacturing",
+) -> dict[str, Any]:
+    return insurance_premium_estimate(lat, lon, overall_risk, sector)
+
+# ═══════════════════════════════════════════════════════════════════════
+# TOOL 14: get_funding_check
+# ═══════════════════════════════════════════════════════════════════════
+
+@mcp.tool(
+    name="get_funding_check",
+    description="Prüft die EU-Taxonomy-Konformität und Fördermittel-"
+    "Eignung für Klimaschutz- und Anpassungsmaßnahmen.",
+)
+async def get_funding_check(
+    standort_art: str = "produktion",
+    sector: str = "manufacturing",
+    measure: str = "energy_efficiency",
+    eu_taxonomy_aligned: bool = False,
+) -> dict[str, Any]:
+    programs = await src_kfw.get_funding_programs(standort_art=standort_art, sector=sector, measure=measure)
+    return {
+        "standort_art": standort_art, "sector": sector, "measure": measure,
+        "eu_taxonomy_aligned": eu_taxonomy_aligned,
+        "program_count": len(programs),
+        "matching_programs": programs,
+        "eu_taxonomy_eligible": eu_taxonomy_aligned or "Requires EU Taxonomy alignment assessment",
+        "data_source": "KfW Bankengruppe, BAFA, EU Taxonomy Regulation 2020/852",
+    }
+
+# ═══════════════════════════════════════════════════════════════════════
+# ENTRY POINT
+# ═══════════════════════════════════════════════════════════════════════
 
 def main():
     """Run the MCP server over stdio."""
-    logger.info("Starting Climate CSRD MCP Server v1.0.0")
+    logger.info("Starting Climate CSRD MCP Server v2.0.0 (14 tools)")
     mcp.run(transport="stdio")
-
 
 if __name__ == "__main__":
     main()
