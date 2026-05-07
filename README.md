@@ -4,20 +4,65 @@
 
 Kombiniert Copernicus-Satellitendaten, DWD-Wetterdaten, EU-ETS-Emissionsbenchmarks, UBA-Umweltdaten und EU-ESRS-Regularien zu einer standortbezogenen Risikobewertung — bereitgestellt als **Model Context Protocol (MCP)** Server.
 
-## Features 🚀
+## Tools 🛠️
 
-| Tool | Beschreibung |
-|---|---|
-| `assess_climate_risk` | Physisches Klimarisiko (Hochwasser, Hitze, Dürre) → Gesamt-Score 1-5 |
-| `get_emission_benchmarks` | Branchen-Emissionsvergleiche aus EU ETS + EEA |
-| `get_csrd_requirements` | ESRS-Offenlegungspflichten nach CSRD-Kriterien |
-| `csrd_report` | Kompletter CSRD-Berichtsbaustein für einen Standort |
-| `get_kfw_funding` | Fördermittel-Finder (KfW, BAFA) |
+### 1. `assess_climate_risk`
+Bewertet das physische Klimarisiko eines Standorts. Kombiniert Hochwasser, Hitze, Dürre, Sturm, Meeresspiegel und Waldbrand zu einem gewichteten Gesamt-Risikoscore (1-5).
+
+### 2. `compare_sites`
+Vergleicht mehrere Standorte hinsichtlich ihres physischen Klimarisikos. Gibt eine Side-by-Side-Analyse mit Ranking aus.
+
+### 3. `get_emission_benchmarks`
+Holt Branchen-Emissionsbenchmarks aus dem EU ETS und der EEA-Datenbank. Liefert Durchschnitt, Top/Bottom 10% und Trend.
+
+### 4. `get_csrd_requirements`
+Ermittelt ESRS-Offenlegungspflichten nach CSRD. Basiert auf Art. 3, Sektor-Materialität und Unternehmensgröße.
+
+### 5. `csrd_report`
+Erstellt einen CSRD-konformen Berichtsbaustein für einen Standort inkl. Risikoanalyse, Emissionsbenchmark und ESRS-Matrix.
+
+### 6. `get_kfw_funding`
+Findet KfW- und BAFA-Förderprogramme für Klimaschutz- und Anpassungsmaßnahmen.
+
+### 7. `get_carbon_forecast`
+EU ETS Kohlenstoffpreis-Prognose 2025-2040. Enthält Jahresprojektionen (min/max/central), Szenarien und Quellen.
+
+### 8. `get_crrem_pathways`
+CRREM Dekarbonisierungspfade für Immobilien. Unterstützt 5 Asset-Typen (office, retail, residential, logistics, hotel) in 15 EU-Ländern mit 3 Szenarien.
+
+### 9. `get_supply_chain_risk`
+Bewertet Klimarisiken in der Lieferkette basierend auf Sektoren und Regionen der Lieferanten.
+
+### 10. `get_climate_synergy`
+Liefert NDVI, Dürre- und Frostdaten für landwirtschaftliche Anwendungen (crop-mcp Integration). Growing Season Quality Index.
+
+### 11. `get_double_materiality`
+ESRS Double Materiality Assessment. Ermittelt Impact- und Financial-Materiality für einen Sektor unter Berücksichtigung von Standortrisiken.
+
+### 12. `get_financial_climate_risk`
+Schätzt die finanziellen Auswirkungen von physischen Klimarisiken basierend auf Risikoscore, Sektor und Umsatz.
+
+### 13. `get_insurance_estimate`
+Schätzt die Kosten für Betriebsunterbrechungs-Versicherung basierend auf Standortrisiko und Branche.
+
+### 14. `get_funding_check`
+Prüft die EU-Taxonomy-Konformität und Fördermittel-Eignung für Klimaschutz- und Anpassungsmaßnahmen.
+
+### 15. `portfolio_risk`
+Bewertet das Klimarisiko eines gesamten Standort-Portfolios. Aggregiert Einzelrisiken, berechnet finanzielle Exposure und priorisiert Maßnahmen. Erwartet eine Liste von Standorten mit Namen, Koordinaten, Sektor und Umsatzanteil.
+
+### 16. `ngfs_scenarios`
+Vergleicht Klimarisiken über verschiedene NGFS-Szenarien (Net Zero 2050, Below 2°C, NDCs, Current Policies). Mappt NGFS-Szenarien auf RCP-Pfade und vergleicht die Risikoprofile.
+
+## Helper Functions
+
+### `_prepare_report_text(report)`
+Formatiert die Ausgabe des `csrd_report`-Tools als strukturierten Markdown-Text, geeignet für PDF-Export. Enthält Header, physikalische Risikozusammenfassung, ESRS-Matrix, Empfehlungen und Disclaimer.
 
 ## Datenquellen 📡
 
 | Quelle | Daten | Zugang |
-|---|---|---|
+|--------|-------|--------|
 | [Copernicus CDS](https://cds.climate.copernicus.eu/) | Hochwasser, Dürre, Landnutzung | API-Key (optional) |
 | [DWD OpenData](https://opendata.dwd.de/) | Hitzetage, Klimareferenz | Kostenlos |
 | [EU ETS](https://ec.europa.eu/clima/eu-ets/) | Emissionsbenchmarks | Öffentlich |
@@ -100,6 +145,26 @@ assess_climate_risk(lat=48.1351, lon=11.5820, location_name="München", year_hor
 - Dürre: 🟢 Risikoklasse 2
 - **Gesamt: 🟠 Risikoscore 3 (Mittel)**
 
+### Portfolio-Risiko
+
+```python
+portfolio_risk(
+    sites=[
+        {"name": "Berlin Plant", "lat": 52.52, "lon": 13.405, "sector": "manufacturing", "revenue_share_pct": 40},
+        {"name": "Hamburg Office", "lat": 53.55, "lon": 9.993, "sector": "real_estate", "revenue_share_pct": 25},
+        {"name": "Munich Lab", "lat": 48.135, "lon": 11.582, "sector": "technology", "revenue_share_pct": 35},
+    ],
+    total_portfolio_revenue_eur_m=500.0,
+    year_horizon=2030
+)
+```
+
+### NGFS Szenarien-Vergleich
+
+```python
+ngfs_scenarios(lat=48.1351, lon=11.5820, location_name="München", year_horizon=2050)
+```
+
 ### CSRD-Bericht für Produktionsstandort
 
 ```python
@@ -137,7 +202,7 @@ climate-csrd-mcp/
 └── src/
     └── climate_csrd_mcp/
         ├── __init__.py
-        ├── server.py           # MCP-Server (FastMCP) + 5 Tools
+        ├── server.py           # MCP-Server (FastMCP) + 16 Tools
         ├── cache.py            # SQLite-Cache-Layer
         ├── utils.py            # Risiko-Scoring, ESRS-Mapping
         └── data_sources/
@@ -147,13 +212,14 @@ climate-csrd-mcp/
             ├── eu_ets.py       # Emissionsbenchmarks
             ├── uba.py          # Luftqualität, Grundwasser
             ├── eurlex.py       # ESRS-Regularien
-            └── kfw.py          # Förderprogramme
+            ├── kfw.py          # Förderprogramme
+            └── crrem.py        # CRREM-Pfade
 ```
 
 ## Cache 🗄️
 
 - **SQLite-basiert**: Automatisch, erster Start erzeugt `climate_cache.db`
-- **TTL**: Klimadaten 30 Tage, Emissionen 7 Tage, CSRD 30 Tage
+- **TTL**: Klimadaten 30 Tage, Emissionen 7 Tage, CSRD 30 Tage, NGFS 30 Tage
 - **Standort-Basiert**: Gleicher Standort → gleicher Cache-Key → kein API-Call
 
 ## Disclaimer ⚠️

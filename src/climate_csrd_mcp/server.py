@@ -1,21 +1,22 @@
-"""
-Climate CSRD MCP Server — Main entry point.
+"""Climate CSRD MCP Server - Main entry point.
 
-Implements 14 MCP tools:
-  1. assess_climate_risk       — Physical climate risk (flood, heat, drought, storm, SLR, wildfire)
-  2. get_emission_benchmarks   — EU ETS + sector emission benchmarks
-  3. get_csrd_requirements     — ESRS/CSRD reporting obligations
-  4. csrd_report               — Full CSRD-compliant report module
-  5. get_kfw_funding           — KfW/BAFA funding programs
-  6. compare_sites             — Compare multiple locations side by side
-  7. get_carbon_forecast       — EU ETS carbon price projections
-  8. get_crrem_pathways        — CRREM real estate decarbonization pathways
-  9. get_supply_chain_risk     — Supply chain climate risk assessment
-  10. get_climate_synergy      — NDVI/frost/drought data (crop-mcp integration)
-  11. get_double_materiality   — ESRS double materiality assessment
-  12. get_financial_climate_risk — Financial impact of physical climate risks
-  13. get_insurance_estimate   — Business interruption insurance premium ranges
-  14. get_funding_check        — EU Taxonomy alignment + funding eligibility
+Implements 16 MCP tools:
+  1.  assess_climate_risk        - Physical climate risk (flood, heat, drought, storm, SLR, wildfire)
+  2.  get_emission_benchmarks    - EU ETS + sector emission benchmarks
+  3.  get_csrd_requirements      - ESRS/CSRD reporting obligations
+  4.  csrd_report                - Full CSRD-compliant report module
+  5.  get_kfw_funding            - KfW/BAFA funding programs
+  6.  compare_sites              - Compare multiple locations side by side
+  7.  get_carbon_forecast        - EU ETS carbon price projections
+  8.  get_crrem_pathways         - CRREM real estate decarbonization pathways
+  9.  get_supply_chain_risk      - Supply chain climate risk assessment
+  10. get_climate_synergy        - NDVI/frost/drought data (crop-mcp integration)
+  11. get_double_materiality     - ESRS double materiality assessment
+  12. get_financial_climate_risk - Financial impact of physical climate risks
+  13. get_insurance_estimate     - Business interruption insurance premium ranges
+  14. get_funding_check          - EU Taxonomy alignment + funding eligibility
+  15. portfolio_risk             - Portfolio-wide climate risk aggregation and financial exposure
+  16. ngfs_scenarios             - NGFS scenario comparison (Net Zero 2050, Below 2C, NDCs, Current Policies)
 """
 
 import asyncio
@@ -141,11 +142,12 @@ async def assess_climate_risk(
 @mcp.tool(
     name="compare_sites",
     description="Vergleicht mehrere Standorte hinsichtlich ihres physischen Klimarisikos. "
-    "Gibt eine Side-by-Side-Analyse mit Ranking aus.",
+    "Unterstützt format='json'|'heatmap'|'table'. Gibt Ranking + visuelle Heatmap.",
 )
 async def compare_sites(
     sites: list[dict],
     year_horizon: int = 2030,
+    format: str = "json",
 ) -> list[dict[str, Any]]:
     results = await asyncio.gather(*[
         assess_climate_risk(s["lat"], s["lon"], s.get("name", ""), year_horizon)
@@ -159,6 +161,7 @@ async def compare_sites(
             "name": r["location"]["name"],
             "overall_score": r["overall_risk"]["score"],
             "overall_label": r["overall_risk"]["label"],
+            "overall_color": r["overall_risk"]["color"],
             "flood": r["flood_risk"]["class"],
             "heat": r["heat_risk"]["class"],
             "drought": r["drought_risk"]["class"],
@@ -167,6 +170,18 @@ async def compare_sites(
             "wildfire": r["wildfire_risk"]["class"],
             "detail": r,
         })
+
+    # Add heatmap text if requested
+    if format in ("heatmap", "table"):
+        emoji = {1: "🟢", 2: "🟢", 3: "🟠", 4: "🔴", 5: "🔥"}
+        header = f"| {'Rank':<5} | {'Location':<20} | {'🌊 Flood':<8} | {'🌡️ Heat':<8} | {'🏜️ Drought':<8} | {'🌪️ Storm':<8} | {'🔥 Fire':<8} | {'⭐ Score':<8} |"
+        sep = "|" + ":" + "-"*4 + ":" + "|" + ":" + "-"*19 + ":" + "|:" + "-"*6 + ":|:" + "-"*6 + ":|:" + "-"*6 + ":|:" + "-"*6 + ":|:" + "-"*6 + ":|:" + "-"*6 + ":|"
+        rows = []
+        for c in comparisons:
+            rows.append(f"| {c['rank']:<5} | {c['name'][:20]:<20} | {emoji.get(c['flood'],'')} {c['flood']:<4} | {emoji.get(c['heat'],'')} {c['heat']:<4} | {emoji.get(c['drought'],'')} {c['drought']:<4} | {emoji.get(c['storm'],'')} {c['storm']:<4} | {emoji.get(c['wildfire'],'')} {c['wildfire']:<4} | {emoji.get(c['overall_score'],'')} {c['overall_score']:<4} |")
+        heatmap_text = "## 🌍 Standort-Vergleich (Heatmap)\n\n" + header + "\n" + sep + "\n" + "\n".join(rows)
+        return {"comparisons": comparisons, "heatmap": heatmap_text, "format": format}
+
     return comparisons
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -408,6 +423,412 @@ async def get_insurance_estimate(
     return insurance_premium_estimate(lat, lon, overall_risk, sector)
 
 # ═══════════════════════════════════════════════════════════════════════
+# TOOL 15: portfolio_risk
+# ═══════════════════════════════════════════════════════════════════════
+
+@mcp.tool(
+    name="portfolio_risk",
+    description="Bewertet das Klimarisiko eines gesamten Standort-Portfolios. "
+    "Aggregiert Einzelrisiken, berechnet finanzielle Exposure und priorisiert Massnahmen.",
+)
+async def portfolio_risk(
+    sites: list[dict],
+    total_portfolio_revenue_eur_m: float = 1000.0,
+    year_horizon: int = 2030,
+) -> dict[str, Any]:
+    """
+    Assess climate risk across a portfolio of sites.
+
+    Each site dict: {"name": str, "lat": float, "lon": float, "sector": str, "revenue_share_pct": float}
+    revenue_share_pct is the site's share of total portfolio revenue (0-100).
+    """
+    if not sites:
+        return {"error": "No sites provided", "portfolio_summary": {}}
+
+    # Normalise revenue shares to ensure they sum to 100%
+    total_share = sum(s.get("revenue_share_pct", 0) for s in sites)
+    if total_share == 0:
+        # Equal weights if no revenue shares provided
+        for s in sites:
+            s["revenue_share_pct"] = 100.0 / len(sites)
+        total_share = 100.0
+
+    # Run climate risk assessment for all sites in parallel
+    risk_tasks = [
+        assess_climate_risk(
+            s["lat"], s["lon"],
+            s.get("name", f"Site_{i}"),
+            year_horizon,
+        )
+        for i, s in enumerate(sites)
+    ]
+    risk_results = await asyncio.gather(*risk_tasks)
+
+    # Compute per-site analysis with financial exposure
+    site_analyses = []
+    risk_scores = []
+    total_financial_exposure = 0.0
+
+    for i, s in enumerate(sites):
+        risk = risk_results[i]
+        overall_score = risk["overall_risk"]["score"]
+        site_revenue = total_portfolio_revenue_eur_m * (s.get("revenue_share_pct", 0) / 100.0)
+
+        # Financial risk estimate for this site
+        fin = financial_risk_estimate(overall_score, s.get("sector", "manufacturing"), site_revenue)
+
+        site_analyses.append({
+            "name": s.get("name", risk["location"]["name"]),
+            "lat": s["lat"],
+            "lon": s["lon"],
+            "sector": s.get("sector", "unknown"),
+            "revenue_share_pct": s.get("revenue_share_pct", 0),
+            "site_revenue_eur_m": round(site_revenue, 2),
+            "overall_risk_score": overall_score,
+            "overall_risk_label": risk["overall_risk"]["label"],
+            "overall_risk_color": risk["overall_risk"]["color"],
+            "flood_risk": risk["flood_risk"]["class"],
+            "heat_risk": risk["heat_risk"]["class"],
+            "drought_risk": risk["drought_risk"]["class"],
+            "storm_risk": risk["storm_risk"]["class"],
+            "sea_level_rise_risk": risk["sea_level_rise_risk"]["class"],
+            "wildfire_risk": risk["wildfire_risk"]["class"],
+            "financial_risk": {
+                "annual_loss_pct": fin["annual_loss_pct"],
+                "annual_loss_eur_m": fin["annual_loss_eur_m"],
+                "confidence_interval": fin["confidence_interval"],
+            },
+            "detail": risk,
+        })
+        risk_scores.append(overall_score)
+        total_financial_exposure += fin["annual_loss_eur_m"]
+
+    # Sort by risk score descending (highest risk first)
+    site_analyses.sort(key=lambda x: x["overall_risk_score"], reverse=True)
+
+    # Portfolio-level aggregation
+    weighted_avg_risk = sum(
+        a["overall_risk_score"] * (a["revenue_share_pct"] / 100.0)
+        for a in site_analyses
+    )
+    portfolio_risk_score = max(1, min(5, round(weighted_avg_risk)))
+
+    # Risk distribution
+    risk_distribution = {}
+    for score in range(1, 6):
+        count = sum(1 for a in site_analyses if a["overall_risk_score"] == score)
+        if count > 0:
+            risk_distribution[f"level_{score}"] = count
+
+    # Critical sites (top 3 or any with score >= 4)
+    critical_sites = [a for a in site_analyses if a["overall_risk_score"] >= 4]
+    if len(critical_sites) < 3:
+        critical_sites = site_analyses[:min(3, len(site_analyses))]
+
+    # Revenue-weighted financial exposure
+    revenue_at_risk_pct = 0.0
+    for a in site_analyses:
+        if a["overall_risk_score"] >= 3:
+            revenue_at_risk_pct += a["revenue_share_pct"]
+
+    # Recommendations
+    recommendations = []
+    if portfolio_risk_score >= 4:
+        recommendations.append({
+            "priority": "critical",
+            "action": "Sofortige Klimaanpassungsstrategie fuer das gesamte Portfolio erforderlich",
+            "esrs_ref": "E1-1, E1-7",
+        })
+    if portfolio_risk_score >= 3:
+        recommendations.append({
+            "priority": "high",
+            "action": "Detaillierte Klimarisikoanalyse fuer alle Standorte mit Score >= 3 durchfuehren",
+            "esrs_ref": "E1-2, E1-7",
+        })
+    if critical_sites:
+        site_names = ", ".join(s["name"] for s in critical_sites[:3])
+        recommendations.append({
+            "priority": "high",
+            "action": f"Standorte mit hoechstem Risiko priorisieren: {site_names}",
+            "esrs_ref": "E1-7",
+        })
+    if total_financial_exposure > total_portfolio_revenue_eur_m * 0.05:
+        recommendations.append({
+            "priority": "high",
+            "action": "Finanzielles Exposure ueberschreitet 5% des Portfolioumsatzes - Absicherung pruefen",
+            "esrs_ref": "E1-7, E1-9",
+        })
+    if revenue_at_risk_pct > 30:
+        recommendations.append({
+            "priority": "medium",
+            "action": f"Ueber {revenue_at_risk_pct:.0f}% des Umsatzes in Standorten mit mittlerem bis hohem Risiko",
+            "esrs_ref": "E1-7",
+        })
+    if not recommendations:
+        recommendations.append({
+            "priority": "low",
+            "action": "Portfolio-Risiko ist gering. Regelmaessiges Monitoring empfohlen",
+            "esrs_ref": "E1-2",
+        })
+
+    result = {
+        "portfolio_summary": {
+            "total_sites": len(sites),
+            "portfolio_risk_score": portfolio_risk_score,
+            "portfolio_risk_label": risk_label(portfolio_risk_score),
+            "portfolio_risk_color": risk_color(portfolio_risk_score),
+            "weighted_average_risk": round(weighted_avg_risk, 2),
+            "total_portfolio_revenue_eur_m": total_portfolio_revenue_eur_m,
+            "total_financial_exposure_eur_m": round(total_financial_exposure, 2),
+            "exposure_pct_of_revenue": round((total_financial_exposure / total_portfolio_revenue_eur_m * 100) if total_portfolio_revenue_eur_m > 0 else 0, 2),
+            "revenue_at_risk_pct": round(revenue_at_risk_pct, 1),
+            "year_horizon": year_horizon,
+        },
+        "risk_distribution": risk_distribution,
+        "financial_exposure": {
+            "total_annual_loss_estimate_eur_m": round(total_financial_exposure, 2),
+            "methodology": "Sector-specific loss tables based on IPCC AR6, EIOPA 2022, NGFS scenarios",
+            "unit": "EUR million per year",
+        },
+        "critical_sites": [
+            {
+                "rank": idx + 1,
+                "name": s["name"],
+                "sector": s["sector"],
+                "overall_risk_score": s["overall_risk_score"],
+                "overall_risk_label": s["overall_risk_label"],
+                "financial_exposure_eur_m": s["financial_risk"]["annual_loss_eur_m"],
+                "revenue_share_pct": s["revenue_share_pct"],
+            }
+            for idx, s in enumerate(critical_sites[:5])
+        ],
+        "site_analyses": site_analyses,
+        "recommendations": recommendations,
+        "methodology": (
+            "Portfolio risk computed as revenue-weighted average of individual site climate risk scores. "
+            "Financial exposure uses sector-specific loss functions from IPCC AR6 and EIOPA climate stress tests. "
+            "Sites are assessed using the full 6-dimension physical risk model (flood, heat, drought, storm, SLR, wildfire)."
+        ),
+        "disclaimer": CSRD_DISCLAIMER,
+    }
+    return result
+
+# ═══════════════════════════════════════════════════════════════════════
+# TOOL 16: ngfs_scenarios
+# ═══════════════════════════════════════════════════════════════════════
+
+# NGFS scenario to RCP mapping
+NGFS_TO_RCP = {
+    "net_zero_2050": "rcp_2.6",
+    "below_2c": "rcp_4.5",
+    "ndcs": "rcp_7.0",
+    "current_policies": "rcp_8.5",
+}
+
+NGFS_SCENARIO_LABELS = {
+    "net_zero_2050": "Net Zero 2050 (NZ2050)",
+    "below_2c": "Below 2C (B2C)",
+    "ndcs": "Nationally Determined Contributions (NDCs)",
+    "current_policies": "Current Policies (CP)",
+}
+
+
+@mcp.tool(
+    name="ngfs_scenarios",
+    description="Vergleicht Klimarisiken ueber verschiedene NGFS-Szenarien "
+    "(Net Zero 2050, Below 2C, NDCs, Current Policies).",
+)
+async def ngfs_scenarios(
+    lat: float, lon: float,
+    location_name: str = "",
+    year_horizon: int = 2050,
+    revenue_exposure_eur_m: float = 0.0,
+) -> dict[str, Any]:
+    """
+    Compare climate risks across four NGFS scenarios.
+
+    Maps NGFS scenarios to RCP pathways:
+      - Net Zero 2050 (NZ2050)  -> RCP 2.6  (Paris-aligned)
+      - Below 2C (B2C)          -> RCP 4.5  (Moderate)
+      - NDCs                    -> RCP 7.0  (High)
+      - Current Policies (CP)   -> RCP 8.5  (Business-as-Usual)
+    """
+    lat, lon = validate_coordinates(lat, lon)
+    cache = get_cache()
+    cache_key = cache.make_key("ngfs", str(lat), str(lon), str(year_horizon))
+    cached = cache.get(cache_key)
+    if cached:
+        logger.info(f"NGFS cache HIT for {lat},{lon}")
+        return cached
+
+    logger.info(f"Computing NGFS scenario comparison for {lat},{lon}")
+
+    # Run all four NGFS scenarios in parallel
+    scenario_tasks = {}
+    for ngfs_key, rcp_key in NGFS_TO_RCP.items():
+        scenario_tasks[ngfs_key] = assess_climate_risk(
+            lat, lon,
+            location_name=location_name or f"{lat:.4f}, {lon:.4f}",
+            year_horizon=year_horizon,
+            scenario=rcp_key,
+        )
+
+    # Gather all results
+    scenario_results = {}
+    for ngfs_key, task in scenario_tasks.items():
+        scenario_results[ngfs_key] = await task
+
+    # Build scenario comparison table
+    scenarios = []
+    for ngfs_key in NGFS_TO_RCP:
+        rcp_key = NGFS_TO_RCP[ngfs_key]
+        result = scenario_results[ngfs_key]
+        overall = result["overall_risk"]
+
+        # Get RCP metadata from utils
+        rcp_info = {
+            "rcp_key": rcp_key,
+            "label": "",
+            "temp_rise_c": 0,
+            "co2_concentration_ppm": 0,
+        }
+        try:
+            from .utils import get_rcp_scenario
+            rcp_data = get_rcp_scenario(rcp_key)
+            if "error" not in rcp_data:
+                rcp_info["label"] = rcp_data.get("label", "")
+                rcp_info["temp_rise_c"] = rcp_data.get("temp_rise_c", {}).get("mean", 0)
+                rcp_info["co2_concentration_ppm"] = rcp_data.get("co2_concentration_ppm", {}).get("by_2050" if year_horizon >= 2050 else "by_2050", 0)
+        except Exception:
+            pass
+
+        scenarios.append({
+            "ngfs_scenario": ngfs_key,
+            "ngfs_label": NGFS_SCENARIO_LABELS.get(ngfs_key, ngfs_key),
+            "rcp_scenario": rcp_key,
+            "rcp_info": rcp_info,
+            "overall_risk_score": overall["score"],
+            "overall_risk_label": overall["label"],
+            "overall_risk_color": overall["color"],
+            "flood_risk": result["flood_risk"]["class"],
+            "heat_risk": {
+                "class": result["heat_risk"]["class"],
+                "projected_hot_days": result["heat_risk"]["projected_hot_days_per_year"],
+            },
+            "drought_risk": result["drought_risk"]["class"],
+            "storm_risk": result["storm_risk"]["class"],
+            "sea_level_rise_risk": {
+                "class": result["sea_level_rise_risk"]["class"],
+                "rise_cm": result["sea_level_rise_risk"].get("rise_cm", 0),
+            },
+            "wildfire_risk": result["wildfire_risk"]["class"],
+            "detail": result,
+        })
+
+    # Find best and worst case
+    scenarios_sorted = sorted(scenarios, key=lambda s: s["overall_risk_score"])
+    best_case = scenarios_sorted[0]
+    worst_case = scenarios_sorted[-1]
+
+    # Risk spread analysis
+    risk_spread = worst_case["overall_risk_score"] - best_case["overall_risk_score"]
+    has_significant_spread = risk_spread >= 2
+
+    # Identify hazards with most scenario sensitivity
+    hazard_sensitivity = []
+    for hazard_name in ["flood", "heat_risk", "drought", "storm", "sea_level_rise", "wildfire"]:
+        values = []
+        for s in scenarios:
+            v = s.get(hazard_name, {})
+            if isinstance(v, dict):
+                val = v.get("class", 0)
+            else:
+                val = v
+            values.append(val)
+        if values:
+            spread = max(values) - min(values)
+            if spread >= 1:
+                hazard_sensitivity.append({
+                    "hazard": hazard_name.replace("_risk", "").replace("_", " ").title(),
+                    "min_score": min(values),
+                    "max_score": max(values),
+                    "spread": spread,
+                })
+
+    hazard_sensitivity.sort(key=lambda h: h["spread"], reverse=True)
+
+    # Recommendations
+    recommendations = []
+    if risk_spread >= 2:
+        recommendations.append({
+            "priority": "high",
+            "action": f"Grosse Szenario-Abhaengigkeit ({risk_spread} Stufen) - "
+                      "Klimarisiko stark von Emissionspfad abhaengig. Ambitionierte "
+                      "Klimapolitik reduziert Risiko signifikant.",
+            "esrs_ref": "E1-1, E1-7",
+        })
+    if worst_case["overall_risk_score"] >= 4:
+        recommendations.append({
+            "priority": "high",
+            "action": f"Selbst im besten Szenario ({best_case['ngfs_label']}) "
+                      "besteht erhoehtes Risiko. Anpassungsmassnahmen dringend empfohlen.",
+            "esrs_ref": "E1-2, E1-7",
+        })
+    if hazard_sensitivity:
+        top_hazard = hazard_sensitivity[0]["hazard"]
+        recommendations.append({
+            "priority": "medium",
+            "action": f"Hoechste Szenario-Sensitivitaet bei '{top_hazard}' - "
+                      "Monitoring und fruehzeitige Anpassung empfohlen.",
+            "esrs_ref": "E1-2",
+        })
+    if not recommendations:
+        recommendations.append({
+            "priority": "low",
+            "action": "Geringe Szenario-Varianz. Risiko ist robust ueber alle Pfade. Regelmaessige Ueberpruefung empfohlen.",
+            "esrs_ref": "E1-2",
+        })
+
+    result = {
+        "location": {
+            "lat": lat,
+            "lon": lon,
+            "name": location_name or f"{lat:.4f}, {lon:.4f}",
+            "year_horizon": year_horizon,
+        },
+        "scenario_comparison": scenarios,
+        "best_case": {
+            "scenario": best_case["ngfs_label"],
+            "overall_risk_score": best_case["overall_risk_score"],
+            "overall_risk_label": best_case["overall_risk_label"],
+        },
+        "worst_case": {
+            "scenario": worst_case["ngfs_label"],
+            "overall_risk_score": worst_case["overall_risk_score"],
+            "overall_risk_label": worst_case["overall_risk_label"],
+        },
+        "risk_spread": {
+            "difference": risk_spread,
+            "has_significant_spread": has_significant_spread,
+            "interpretation": (
+                f"Der Risikounterschied zwischen {best_case['ngfs_label']} "
+                f"und {worst_case['ngfs_label']} betraegt {risk_spread} Stufen."
+            ),
+        },
+        "hazard_sensitivity": hazard_sensitivity,
+        "recommendations": recommendations,
+        "methodology": (
+            "NGFS scenarios mapped to IPCC RCP pathways: "
+            "NZ2050->RCP2.6, B2C->RCP4.5, NDCs->RCP7.0, CP->RCP8.5. "
+            "Each scenario runs the full 6-dimension physical climate risk model. "
+            "Scenario comparison based on Network for Greening the Financial System (NGFS) Phase 4 scenarios."
+        ),
+        "disclaimer": CSRD_DISCLAIMER,
+    }
+    cache.set(cache_key, result, category="ngfs")
+    return result
+
+# ═══════════════════════════════════════════════════════════════════════
 # TOOL 14: get_funding_check
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -438,8 +859,170 @@ async def get_funding_check(
 
 def main():
     """Run the MCP server over stdio."""
-    logger.info("Starting Climate CSRD MCP Server v2.0.0 (14 tools)")
+    logger.info("Starting Climate CSRD MCP Server v2.1.0 (16 tools)")
     mcp.run(transport="stdio")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# HELPER: _prepare_report_text
+# ═══════════════════════════════════════════════════════════════════════
+
+def _prepare_report_text(report: dict) -> str:
+    """
+    Format a csrd_report() output dict as a structured markdown report.
+
+    Args:
+        report: The dict returned by the csrd_report tool.
+
+    Returns:
+        Formatted multi-line markdown text suitable for PDF export.
+    """
+    lines = []
+    meta = report.get("report_metadata", {})
+    risk = report.get("physical_climate_risk", {})
+    esrs = report.get("esrs_applicability_matrix", [])
+    recs = report.get("recommendations", [])
+    disclaimer = report.get("disclaimer", "")
+    csrd = report.get("csrd_applicability", {})
+    bench = report.get("emission_benchmarks", {})
+    comp = report.get("benchmark_comparison", {})
+    triggers = report.get("location_specific_triggers", [])
+
+    # ── Header ──
+    lines.append("# CSRD Climate Risk Report")
+    lines.append("")
+    lines.append(f"**Company:** {meta.get('company', 'N/A')}")
+    lines.append(f"**Site:** {meta.get('site', 'N/A')}")
+    lines.append(f"**Sector:** {meta.get('sector', 'N/A')}")
+    lines.append(f"**Report Date:** {meta.get('generated_at', 'N/A')}")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+
+    # ── Physical Risk Summary ──
+    lines.append("## 1. Physical Climate Risk Summary")
+    lines.append("")
+    overall = risk.get("overall_risk", {})
+    loc = risk.get("location", {})
+    lines.append(f"**Location:** {loc.get('name', 'N/A')} ({loc.get('lat', '?')}, {loc.get('lon', '?')})")
+    lines.append(f"**Horizon:** {loc.get('year_horizon', 'N/A')}")
+    lines.append("")
+
+    risk_emoji = {1: "🟢 Very Low", 2: "🟡 Low", 3: "🟠 Medium", 4: "🔴 High", 5: "🔥 Very High"}
+    overall_score = overall.get("score", 0)
+    overall_label = overall.get("label", "Unknown")
+    lines.append(f"**Overall Risk Score:** {overall_score}/5 - {risk_emoji.get(overall_score, overall_label)}")
+    lines.append("")
+
+    # Hazard table (emoji-style)
+    hazards = [
+        ("Flood", risk.get("flood_risk", {}).get("class", 0)),
+        ("Heat", risk.get("heat_risk", {}).get("class", 0)),
+        ("Drought", risk.get("drought_risk", {}).get("class", 0)),
+        ("Storm", risk.get("storm_risk", {}).get("class", 0)),
+        ("Sea Level Rise", risk.get("sea_level_rise_risk", {}).get("class", 0)),
+        ("Wildfire", risk.get("wildfire_risk", {}).get("class", 0)),
+    ]
+    for name, score in hazards:
+        emoji = risk_emoji.get(score, "⚪")
+        lines.append(f"- **{name}:** {emoji} (Score {score}/5)")
+
+    lines.append("")
+    methodology = overall.get("methodology", "")
+    if methodology:
+        lines.append(f"*Methodology: {methodology}*")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+
+    # ── Financial Impact ──
+    lines.append("## 2. Financial Exposure")
+    lines.append("")
+    # If the report has financial data, note it
+    if comp:
+        diff = comp.get("difference_pct", 0)
+        status = comp.get("status", "unknown")
+        own = comp.get("own_intensity", 0)
+        avg = comp.get("sector_average", 0)
+        lines.append(f"- **Own Emission Intensity:** {own} tCO2e/Em Revenue")
+        lines.append(f"- **Sector Average:** {avg} tCO2e/Em Revenue")
+        lines.append(f"- **Difference:** {diff}% ({'above' if diff > 0 else 'below'} sector average)")
+        lines.append("")
+    lines.append("---")
+    lines.append("")
+
+    # ── ESRS Applicability Matrix ──
+    lines.append("## 3. ESRS Applicability Matrix")
+    lines.append("")
+    if csrd:
+        lines.append(f"- **Entity Classification:** {csrd.get('entity_classification', 'N/A')}")
+        lines.append(f"- **First Reporting:** {csrd.get('first_reporting', 'N/A')}")
+        lines.append("")
+    if esrs:
+        lines.append("| Standard | Title | Mandatory | Location Triggered |")
+        lines.append("|----------|-------|-----------|--------------------|")
+        for entry in esrs:
+            std = entry.get("standard", "")
+            title = entry.get("title", "")
+            mandatory = "✅ Yes" if entry.get("mandatory") else "No"
+            loc_trig = "📍 Yes" if entry.get("location_triggered") else ""
+            lines.append(f"| {std} | {title} | {mandatory} | {loc_trig} |")
+    else:
+        lines.append("No ESRS entries found.")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+
+    # ── Location-Specific Triggers ──
+    if triggers:
+        lines.append("## 4. Location-Specific Triggers")
+        lines.append("")
+        for t in triggers:
+            trigger = t.get("trigger", "")
+            reqs = t.get("requirements", [])
+            lines.append(f"- **{trigger}** → {', '.join(reqs)}")
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+
+    # ── Recommendations ──
+    lines.append("## 5. Recommendations")
+    lines.append("")
+    if recs:
+        for r in recs:
+            priority = r.get("priority", "low")
+            area = r.get("area", "")
+            esrs_ref = r.get("esrs_ref", "")
+            priority_emoji = {"high": "🔴", "medium": "🟠", "low": "🟢", "critical": "🔥"}
+            emoji = priority_emoji.get(priority, "⚪")
+            lines.append(f"- {emoji} **Priority: {priority.upper()}** - Area: {area}")
+            if esrs_ref:
+                lines.append(f"  - ESRS Reference: {esrs_ref}")
+    else:
+        lines.append("No specific recommendations generated.")
+    lines.append("")
+
+    # ── Data Sources ──
+    lines.append("## 6. Data Sources")
+    lines.append("")
+    lines.append("- Copernicus Climate Data Store (flood, drought, storm, SLR, wildfire, NDVI)")
+    lines.append("- DWD OpenData (heat days, climate reference)")
+    lines.append("- EU ETS / EEA (emission benchmarks)")
+    lines.append("- UBA Umweltbundesamt (air quality)")
+    lines.append("- EUR-Lex (ESRS standards, CSRD requirements)")
+    lines.append("- KfW / BAFA (funding programs)")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+
+    # ── Disclaimer ──
+    if disclaimer:
+        lines.append(f"*{disclaimer}*" if disclaimer.startswith("Stand") else disclaimer)
+    else:
+        lines.append("*Disclaimer: This report is for informational purposes only. Not audited or verified.*")
+
+    return "\n".join(lines)
+
 
 if __name__ == "__main__":
     main()
