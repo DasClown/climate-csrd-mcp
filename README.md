@@ -73,8 +73,11 @@ Formatiert die Ausgabe des `csrd_report`-Tools als strukturierten Markdown-Text,
 ## Installation 🛠️
 
 ```bash
-# 1. Repository klonen
-git clone https://github.com/YOUR_USER/climate-csrd-mcp.git
+# 1. Via pip (empfohlen)
+pip install git+https://github.com/DasClown/climate-csrd-mcp.git
+
+# 2. Oder Repository klonen
+git clone https://github.com/DasClown/climate-csrd-mcp.git
 cd climate-csrd-mcp
 
 # 2. Python-Umgebung
