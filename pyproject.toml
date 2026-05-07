@@ -1,0 +1,40 @@
+[project]
+name = "climate-csrd-mcp"
+version = "1.0.0"
+description = "MCP Server for Climate Risk Analysis & CSRD Reporting — Copernicus, DWD, EU ETS, UBA & ESRS"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+authors = [
+    { name = "Climate/CSRD Intelligence MCP" },
+]
+keywords = ["mcp", "climate", "csrd", "esrs", "copernicus", "dwd", "eu-ets", "sustainability"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Atmospheric Science",
+]
+
+dependencies = [
+    "mcp>=1.6.0",
+    "httpx>=0.27.0",
+    "pydantic>=2.0.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+copernicus = ["cdsapi>=0.7.0"]
+dev = ["pytest>=8.0", "ruff>=0.5.0"]
+
+[project.scripts]
+climate-csrd-mcp = "climate_csrd_mcp.server:main"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
