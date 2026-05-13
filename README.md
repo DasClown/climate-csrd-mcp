@@ -1,121 +1,143 @@
 # Climate CSRD MCP Server 🌍📊
 
-**MCP-Server für Klimarisiko-Analyse und CSRD/ESRS-Berichterstattung.**
+**MCP Server for Climate Risk Analysis & CSRD/ESRS Reporting — 27 Tools**
 
-Kombiniert Copernicus-Satellitendaten, DWD-Wetterdaten, EU-ETS-Emissionsbenchmarks, UBA-Umweltdaten und EU-ESRS-Regularien zu einer standortbezogenen Risikobewertung — bereitgestellt als **Model Context Protocol (MCP)** Server.
+Combines Copernicus satellite data, DWD weather, EU ETS benchmarks, UBA environmental data, and EU ESRS regulations into a location-based risk assessment delivered as a **Model Context Protocol (MCP)** server.
 
-## Tools 🛠️
+---
 
-### 1. `assess_climate_risk`
-Bewertet das physische Klimarisiko eines Standorts. Kombiniert Hochwasser, Hitze, Dürre, Sturm, Meeresspiegel und Waldbrand zu einem gewichteten Gesamt-Risikoscore (1-5).
+## Tools 🛠️ (27 Total)
 
-### 2. `compare_sites`
-Vergleicht mehrere Standorte hinsichtlich ihres physischen Klimarisikos. Gibt eine Side-by-Side-Analyse mit Ranking aus.
+### Physical Climate Risk
+| Tool | Description |
+|------|-------------|
+| `assess_climate_risk` | 6-dimension physical risk (flood, heat, drought, storm, SLR, wildfire) → weighted score 1-5 |
+| `compare_sites` | Multi-site side-by-side comparison with heatmap & ranking |
+| `portfolio_risk` | Portfolio-wide risk aggregation + financial exposure |
+| `ngfs_scenarios` | NGFS scenario comparison (Net Zero 2050 → Current Policies) |
+| `get_supply_chain_risk` | Supply chain climate risk by sector & region |
 
-### 3. `get_emission_benchmarks`
-Holt Branchen-Emissionsbenchmarks aus dem EU ETS und der EEA-Datenbank. Liefert Durchschnitt, Top/Bottom 10% und Trend.
+### CSRD, ESRS & Regulatory
+| Tool | Description |
+|------|-------------|
+| `get_csrd_requirements` | ESRS disclosure obligations by entity size & sector |
+| `csrd_report` | Full CSRD-compliant report (risk + benchmarks + ESRS matrix) |
+| `get_double_materiality` | ESRS double materiality (impact + financial) |
+| `get_csddd_assessment` | CSDDD supply chain due diligence (human rights + env risk, 3 waves 2027-2029) |
+| `get_de_specific_assessment` | Germany: BISKO, KSG compliance (65%/88%/2045), LkSG |
 
-### 4. `get_csrd_requirements`
-Ermittelt ESRS-Offenlegungspflichten nach CSRD. Basiert auf Art. 3, Sektor-Materialität und Unternehmensgröße.
+### Emissions, Carbon & Energy
+| Tool | Description |
+|------|-------------|
+| `get_emission_benchmarks` | EU ETS sector benchmarks (t CO₂/€ revenue, top/bottom 10%) |
+| `get_carbon_forecast` | EU ETS carbon price forecast 2025-2040 |
+| `get_crrem_pathways` | CRREM decarbonization pathways (15 countries, 5 asset types) |
+| `check_sbti_target` | SBTi target validation (1.5°C/WB2C, 9 sectors) |
+| `calculate_cbam_obligation` | CBAM carbon border adjustment (CN/US/UK carbon prices, free allocation 2026-2034) |
 
-### 5. `csrd_report`
-Erstellt einen CSRD-konformen Berichtsbaustein für einen Standort inkl. Risikoanalyse, Emissionsbenchmark und ESRS-Matrix.
+### ESG & Financial
+| Tool | Description |
+|------|-------------|
+| `get_financial_climate_risk` | Financial loss estimate from physical risks (€M) |
+| `get_insurance_estimate` | Business interruption insurance premium ranges |
+| `get_esg_rating` | ESG rating simulation (MSCI AAA-CCC, Sustainalytics 0-100) |
 
-### 6. `get_kfw_funding`
-Findet KfW- und BAFA-Förderprogramme für Klimaschutz- und Anpassungsmaßnahmen.
+### Biodiversity & Circular Economy
+| Tool | Description |
+|------|-------------|
+| `get_tnfd_assessment` | TNFD biodiversity LEAP assessment (IUCN biomes, nature risk score) |
+| `get_circular_economy_metrics` | ESRS E5 circular economy (circularity score, waste benchmarks) |
 
-### 7. `get_carbon_forecast`
-EU ETS Kohlenstoffpreis-Prognose 2025-2040. Enthält Jahresprojektionen (min/max/central), Szenarien und Quellen.
+### Social
+| Tool | Description |
+|------|-------------|
+| `get_social_sustainability` | ESRS S1-S4 social (HR due diligence, workforce benchmarks, UNGP) |
 
-### 8. `get_crrem_pathways`
-CRREM Dekarbonisierungspfade für Immobilien. Unterstützt 5 Asset-Typen (office, retail, residential, logistics, hotel) in 15 EU-Ländern mit 3 Szenarien.
+### Real Estate & Buildings
+| Tool | Description |
+|------|-------------|
+| `get_real_estate_assessment` | Energy certificates (EPC A+-H), renovation roadmaps, KfW Effizienzhaus |
 
-### 9. `get_supply_chain_risk`
-Bewertet Klimarisiken in der Lieferkette basierend auf Sektoren und Regionen der Lieferanten.
+### TCFD
+| Tool | Description |
+|------|-------------|
+| `get_tcfd_report` | Full TCFD report (governance, strategy, risk mgmt, metrics + ESRS mapping) |
 
-### 10. `get_climate_synergy`
-Liefert NDVI, Dürre- und Frostdaten für landwirtschaftliche Anwendungen (crop-mcp Integration). Growing Season Quality Index.
+### Agriculture (crop-mcp synergy)
+| Tool | Description |
+|------|-------------|
+| `get_climate_synergy` | NDVI, drought & frost data — Growing Season Quality Index |
 
-### 11. `get_double_materiality`
-ESRS Double Materiality Assessment. Ermittelt Impact- und Financial-Materiality für einen Sektor unter Berücksichtigung von Standortrisiken.
+### Funding
+| Tool | Description |
+|------|-------------|
+| `get_kfw_funding` | KfW/BAFA funding programs for climate measures |
+| `get_funding_check` | EU Taxonomy alignment + funding eligibility check |
 
-### 12. `get_financial_climate_risk`
-Schätzt die finanziellen Auswirkungen von physischen Klimarisiken basierend auf Risikoscore, Sektor und Umsatz.
+### Automated Reporting
+| Tool | Description |
+|------|-------------|
+| `generate_full_report_package` | Combined CSRD report: E1-E5, S1-S4, G1, TCFD, TNFD, SBTi, CSDDD, ESG — single call |
 
-### 13. `get_insurance_estimate`
-Schätzt die Kosten für Betriebsunterbrechungs-Versicherung basierend auf Standortrisiko und Branche.
+---
 
-### 14. `get_funding_check`
-Prüft die EU-Taxonomy-Konformität und Fördermittel-Eignung für Klimaschutz- und Anpassungsmaßnahmen.
+## Data Sources 📡
 
-### 15. `portfolio_risk`
-Bewertet das Klimarisiko eines gesamten Standort-Portfolios. Aggregiert Einzelrisiken, berechnet finanzielle Exposure und priorisiert Maßnahmen. Erwartet eine Liste von Standorten mit Namen, Koordinaten, Sektor und Umsatzanteil.
+| Source | Data | Access |
+|--------|------|--------|
+| [Copernicus CDS](https://cds.climate.copernicus.eu/) | Flood, drought, land use, NDVI, storm, SLR, wildfire | API key (optional) |
+| [DWD OpenData](https://opendata.dwd.de/) | Hot days, frost, tropical nights, climate reference | Free |
+| [EU ETS](https://ec.europa.eu/clima/eu-ets/) | Emission benchmarks, carbon price history | Public |
+| [UBA](https://www.umweltbundesamt.de/) | Air quality (LUQ, PM10), groundwater, soil | Free |
+| [EUR-Lex](https://eur-lex.europa.eu/) | ESRS standards, CSRD, CSDDD, CBAM, EU Taxonomy | Public |
+| [KfW](https://www.kfw.de/) | KfW/BAFA/BEG funding programs | Public |
+| [CRREM](https://www.crrem.org/) | Real estate decarbonization pathways | Public |
+| [ILO](https://www.ilo.org/) / [HRW](https://www.hrw.org/) | Human rights risk indices (CSDDD, ESRS S1-S4) | Public |
+| [IPCC AR6](https://www.ipcc.ch/) | Climate scenarios, sector loss tables | Public |
 
-### 16. `ngfs_scenarios`
-Vergleicht Klimarisiken über verschiedene NGFS-Szenarien (Net Zero 2050, Below 2°C, NDCs, Current Policies). Mappt NGFS-Szenarien auf RCP-Pfade und vergleicht die Risikoprofile.
-
-## Helper Functions
-
-### `_prepare_report_text(report)`
-Formatiert die Ausgabe des `csrd_report`-Tools als strukturierten Markdown-Text, geeignet für PDF-Export. Enthält Header, physikalische Risikozusammenfassung, ESRS-Matrix, Empfehlungen und Disclaimer.
-
-## Datenquellen 📡
-
-| Quelle | Daten | Zugang |
-|--------|-------|--------|
-| [Copernicus CDS](https://cds.climate.copernicus.eu/) | Hochwasser, Dürre, Landnutzung | API-Key (optional) |
-| [DWD OpenData](https://opendata.dwd.de/) | Hitzetage, Klimareferenz | Kostenlos |
-| [EU ETS](https://ec.europa.eu/clima/eu-ets/) | Emissionsbenchmarks | Öffentlich |
-| [UBA](https://www.umweltbundesamt.de/) | Luftqualität, Grundwasser | Kostenlos |
-| [EUR-Lex](https://eur-lex.europa.eu/) | ESRS-Standards | Öffentlich |
-| [KfW](https://www.kfw.de/) | Förderprogramme | Öffentlich |
+---
 
 ## Installation 🛠️
 
 ```bash
-# 1. Via pip (empfohlen)
+# Via pip
 pip install git+https://github.com/DasClown/climate-csrd-mcp.git
 
-# 2. Oder Repository klonen
+# Or clone
 git clone https://github.com/DasClown/climate-csrd-mcp.git
 cd climate-csrd-mcp
 
-# 2. Python-Umgebung
+# Python environment
 uv venv
-source .venv/bin/activate  # oder: .venv\Scripts\activate (Windows)
+source .venv/bin/activate
 
-# 3. Installieren
+# Install
 uv pip install -e .
 
-# Optional: Copernicus CDS-Unterstützung
+# Optional: Copernicus CDS support
 uv pip install -e ".[copernicus]"
 ```
 
-## Konfiguration ⚙️
+## Configuration ⚙️
 
 ```bash
 cp .env.example .env
-# .env bearbeiten:
-#   CDS_API_KEY = dein-copernicus-api-key
-#   CLIMATE_CACHE_PATH = /pfad/zur/cache.db
+# Edit .env:
+#   CDS_API_KEY = your-copernicus-api-key
+#   CLIMATE_CACHE_PATH = /path/to/cache.db
 ```
 
-**Copernicus CDS API-Key beantragen:**
-1. Registrierung: https://cds.climate.copernicus.eu/profile
-2. API-Key erstellen: https://cds.climate.copernicus.eu/api-how-to
-3. In `.env` eintragen
+**The server works without a CDS key** — it uses embedded reference data (EEA, DWD, IPCC, ILO).
 
-Der Server funktioniert **auch ohne CDS-Key** — dann werden hinterlegte Referenzdaten (EEA, DWD) verwendet.
+## Usage 📋
 
-## Verwendung 📋
-
-### Als MCP-Server (stdio)
+### As MCP Server (stdio)
 
 ```bash
 climate-csrd-mcp
 ```
 
-### Integration in Hermes Agent
+### Hermes Agent Integration
 
 In `~/.hermes/config.yaml`:
 
@@ -126,78 +148,87 @@ mcp_servers:
     timeout: 120
 ```
 
-Dann stehen die Tools als `mcp_climate-csrd_assess_climate_risk`, etc. zur Verfügung.
-
-### Direkt-Test (über MCP Inspector)
+### Direct Test (MCP Inspector)
 
 ```bash
 npx @modelcontextprotocol/inspector climate-csrd-mcp
 ```
 
-## Beispiele 📊
+---
 
-### Klimarisiko für München (2030)
+## Examples 📊
+
+### Climate risk for a site (2030)
 
 ```python
-assess_climate_risk(lat=48.1351, lon=11.5820, location_name="München", year_horizon=2030)
+assess_climate_risk(lat=48.1351, lon=11.5820, location_name="Munich", year_horizon=2030)
 ```
 
-**Ergebnis:**
-- Hochwasser: 🟢 Risikoklasse 2 (Niedrig)
-- Hitze: 🟠 14 Hitzetage/Jahr → Klasse 3
-- Dürre: 🟢 Risikoklasse 2
-- **Gesamt: 🟠 Risikoscore 3 (Mittel)**
-
-### Portfolio-Risiko
+### Full CSRD report + ESG + SBTi + TCFD in one call
 
 ```python
-portfolio_risk(
-    sites=[
-        {"name": "Berlin Plant", "lat": 52.52, "lon": 13.405, "sector": "manufacturing", "revenue_share_pct": 40},
-        {"name": "Hamburg Office", "lat": 53.55, "lon": 9.993, "sector": "real_estate", "revenue_share_pct": 25},
-        {"name": "Munich Lab", "lat": 48.135, "lon": 11.582, "sector": "technology", "revenue_share_pct": 35},
-    ],
-    total_portfolio_revenue_eur_m=500.0,
-    year_horizon=2030
-)
-```
-
-### NGFS Szenarien-Vergleich
-
-```python
-ngfs_scenarios(lat=48.1351, lon=11.5820, location_name="München", year_horizon=2050)
-```
-
-### CSRD-Bericht für Produktionsstandort
-
-```python
-csrd_report(
-    lat=51.05, lon=13.74,
-    sector="manufacturing",
+generate_full_report_package(
+    site_lat=48.1351, site_lon=11.5820,
     company_name="Example GmbH",
-    site_name="Dresden Plant",
-    employees=1200,
-    revenue=250.0,
-    entity_type="large"
+    sector="manufacturing",
+    employees=1200, revenue=250.0
 )
 ```
 
-## ESRS-Konformität ✅
+### ESG Rating
 
-Der Server ist abgestimmt auf:
+```python
+get_esg_rating(
+    sector="manufacturing",
+    emissions_intensity=0.5,
+    risk_score=3,
+    methodology="msci"
+)
+```
+
+### CBAM Carbon Border Adjustment
+
+```python
+calculate_cbam_obligation(
+    import_goods_tons=5000,
+    embedded_emissions=1.5,
+    origin_country="CN",
+    sector="iron_steel"
+)
+```
+
+---
+
+## ESRS Compliance ✅
 
 - **CSRD**: Directive (EU) 2022/2464
-- **ESRS 1**: Allgemeine Anforderungen
-- **ESRS 2**: Allgemeine Angaben (Strategie, Governance, Wesentlichkeitsanalyse)
-- **ESRS E1-E5**: Umwelt (Klima, Verschmutzung, Wasser, Biodiversität, Kreislaufwirtschaft)
-- **ESRS S1-S4**: Soziales
-- **ESRS G1**: Unternehmensführung
+- **ESRS 1-2**: General requirements & disclosures
+- **ESRS E1**: Climate change (full)
+- **ESRS E2**: Pollution
+- **ESRS E3**: Water & marine resources
+- **ESRS E4**: Biodiversity & ecosystems (TNFD-aligned)
+- **ESRS E5**: Resource use & circular economy
+- **ESRS S1**: Own workforce (17 disclosure requirements)
+- **ESRS S2**: Workers in value chain
+- **ESRS S3**: Affected communities
+- **ESRS S4**: Consumers & end-users
+- **ESRS G1**: Business conduct
 
-## Projektstruktur 📁
+## TCFD Alignment ✅
+
+All 11 TCFD recommended disclosures mapped to ESRS E1 data points.
+
+## TNFD Alignment ✅
+
+Full LEAP (Locate-Evaluate-Assess-Prepare) methodology with IUCN biome classification.
+
+---
+
+## Project Structure 📁
 
 ```
 climate-csrd-mcp/
-├── pyproject.toml          # Package-Konfiguration
+├── pyproject.toml          # Package config (v2.0.0)
 ├── README.md
 ├── LICENSE
 ├── .env.example
@@ -205,34 +236,51 @@ climate-csrd-mcp/
 └── src/
     └── climate_csrd_mcp/
         ├── __init__.py
-        ├── server.py           # MCP-Server (FastMCP) + 16 Tools
-        ├── cache.py            # SQLite-Cache-Layer
-        ├── utils.py            # Risiko-Scoring, ESRS-Mapping
+        ├── server.py           # FastMCP server — 27 tools
+        ├── cache.py            # SQLite cache layer
+        ├── utils.py            # Risk scoring, ESRS mapping, financial estimates
         └── data_sources/
             ├── __init__.py
-            ├── copernicus.py   # Hochwasser, Dürre
-            ├── dwd.py          # Hitzetage, Klimareferenz
-            ├── eu_ets.py       # Emissionsbenchmarks
-            ├── uba.py          # Luftqualität, Grundwasser
-            ├── eurlex.py       # ESRS-Regularien
-            ├── kfw.py          # Förderprogramme
-            └── crrem.py        # CRREM-Pfade
+            ├── copernicus.py   # Flood, drought, NDVI, storm, SLR, wildfire, frost
+            ├── dwd.py          # Hot days, frost, tropical nights, climate reference
+            ├── eu_ets.py       # Emission benchmarks, carbon price history/forecast
+            ├── uba.py          # Air quality, groundwater, soil moisture
+            ├── eurlex.py       # ESRS/CSRD regulations, double materiality
+            ├── kfw.py          # KfW/BAFA/BEG funding programs
+            ├── crrem.py        # CRREM decarbonization pathways
+            ├── tcfd.py         # TCFD report generator (governance, strategy, risk, metrics)
+            ├── tnfd.py         # TNFD biodiversity LEAP assessment
+            ├── sbti.py         # SBTi target validation
+            ├── cbam.py         # CBAM border adjustment calculator
+            ├── esrs_e5.py      # ESRS E5 circular economy
+            ├── esrs_social.py  # ESRS S1-S4 social sustainability
+            ├── csddd.py        # CSDDD supply chain due diligence
+            ├── de_specific.py  # Germany: BISKO, KSG, LkSG
+            ├── esg_rating.py   # MSCI/Sustainalytics ESG rating simulation
+            ├── real_estate.py  # Energy certificates, KfW, renovation roadmaps
+            └── auto_report.py # Combined CSRD report generation
 ```
-
-## Cache 🗄️
-
-- **SQLite-basiert**: Automatisch, erster Start erzeugt `climate_cache.db`
-- **TTL**: Klimadaten 30 Tage, Emissionen 7 Tage, CSRD 30 Tage, NGFS 30 Tage
-- **Standort-Basiert**: Gleicher Standort → gleicher Cache-Key → kein API-Call
-
-## Disclaimer ⚠️
-
-> *Stand: HEUTE. Dies ist keine geprüfte Berichterstattung. Die finale Verantwortung für Richtigkeit und Vollständigkeit liegt beim Unternehmen. Förderprogramme können sich ändern.*
-
-## Lizenz 📄
-
-MIT License — siehe [LICENSE](LICENSE).
 
 ---
 
-**Entwickelt für den Einsatz mit Hermes Agent, Claude Code und anderen MCP-kompatiblen Clients.**
+## Cache 🗄️
+
+- **SQLite-based**: Auto-created on first start (`climate_cache.db`)
+- **TTL**: Climate 30d, emissions 7d, CSRD 30d, weather 1d
+- **Location-keyed**: Same coordinates → same cache key → no redundant computation
+
+---
+
+## Disclaimer ⚠️
+
+> *As of: [DATE]. This is not audited reporting. Final responsibility for accuracy and completeness lies with the company. Funding programs are subject to change.*
+
+---
+
+## License 📄
+
+MIT License — see [LICENSE](LICENSE).
+
+---
+
+**Built for use with Hermes Agent, Claude Code, and MCP-compatible clients.**
