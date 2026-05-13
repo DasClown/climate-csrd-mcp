@@ -1,6 +1,6 @@
 [project]
 name = "climate-csrd-mcp"
-version = "1.0.0"
+version = "2.0.0"
 description = "MCP Server for Climate Risk Analysis & CSRD Reporting — Copernicus, DWD, EU ETS, UBA & ESRS"
 readme = "README.md"
 license = { text = "MIT" }

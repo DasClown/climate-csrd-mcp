@@ -1,22 +1,33 @@
 """Climate CSRD MCP Server - Main entry point.
 
-Implements 16 MCP tools:
-  1.  assess_climate_risk        - Physical climate risk (flood, heat, drought, storm, SLR, wildfire)
-  2.  get_emission_benchmarks    - EU ETS + sector emission benchmarks
-  3.  get_csrd_requirements      - ESRS/CSRD reporting obligations
-  4.  csrd_report                - Full CSRD-compliant report module
-  5.  get_kfw_funding            - KfW/BAFA funding programs
-  6.  compare_sites              - Compare multiple locations side by side
-  7.  get_carbon_forecast        - EU ETS carbon price projections
-  8.  get_crrem_pathways         - CRREM real estate decarbonization pathways
-  9.  get_supply_chain_risk      - Supply chain climate risk assessment
-  10. get_climate_synergy        - NDVI/frost/drought data (crop-mcp integration)
-  11. get_double_materiality     - ESRS double materiality assessment
-  12. get_financial_climate_risk - Financial impact of physical climate risks
-  13. get_insurance_estimate     - Business interruption insurance premium ranges
-  14. get_funding_check          - EU Taxonomy alignment + funding eligibility
-  15. portfolio_risk             - Portfolio-wide climate risk aggregation and financial exposure
-  16. ngfs_scenarios             - NGFS scenario comparison (Net Zero 2050, Below 2C, NDCs, Current Policies)
+Implements 27 MCP tools:
+  1.  assess_climate_risk         - Physical climate risk (flood, heat, drought, storm, SLR, wildfire)
+  2.  get_emission_benchmarks     - EU ETS + sector emission benchmarks
+  3.  get_csrd_requirements       - ESRS/CSRD reporting obligations
+  4.  csrd_report                 - Full CSRD-compliant report module
+  5.  get_kfw_funding             - KfW/BAFA funding programs
+  6.  compare_sites               - Compare multiple locations side by side
+  7.  get_carbon_forecast         - EU ETS carbon price projections
+  8.  get_crrem_pathways          - CRREM real estate decarbonization pathways
+  9.  get_supply_chain_risk       - Supply chain climate risk assessment
+  10. get_climate_synergy         - NDVI/frost/drought data (crop-mcp integration)
+  11. get_double_materiality      - ESRS double materiality assessment
+  12. get_financial_climate_risk  - Financial impact of physical climate risks
+  13. get_insurance_estimate      - Business interruption insurance premium ranges
+  14. get_funding_check           - EU Taxonomy alignment + funding eligibility
+  15. portfolio_risk              - Portfolio-wide climate risk aggregation and financial exposure
+  16. ngfs_scenarios              - NGFS scenario comparison (Net Zero 2050, Below 2C, NDCs, Current Policies)
+  17. get_tcfd_report             - TCFD-aligned climate report
+  18. get_tnfd_assessment         - TNFD biodiversity/nature LEAP assessment
+  19. check_sbti_target           - Validate emission targets against SBTi
+  20. calculate_cbam_obligation   - CBAM import carbon cost calculator
+  21. get_circular_economy_metrics - ESRS E5 circular economy assessment
+  22. get_social_sustainability   - ESRS S1-S4 social assessment
+  23. get_csddd_assessment        - CSDDD supply chain due diligence
+  24. get_de_specific_assessment  - Germany-specific (BISKO/KSG/LkSG)
+  25. get_esg_rating              - ESG rating simulation (MSCI/Sustainalytics)
+  26. get_real_estate_assessment  - Real estate energy/renovation
+  27. generate_full_report_package - Complete CSRD reporting package
 """
 
 import asyncio
@@ -42,6 +53,17 @@ from .utils import (
 )
 from .data_sources import copernicus as src_cop, dwd as src_dwd, uba as src_uba
 from .data_sources import eu_ets as src_ets, eurlex as src_eurlex, kfw as src_kfw
+from .data_sources import tcfd as src_tcfd
+from .data_sources import tnfd as src_tnfd
+from .data_sources import sbti as src_sbti
+from .data_sources import cbam as src_cbam
+from .data_sources import esrs_e5 as src_e5
+from .data_sources import esrs_social as src_social
+from .data_sources import csddd as src_csddd
+from .data_sources import de_specific as src_de
+from .data_sources import esg_rating as src_esg
+from .data_sources import real_estate as src_re
+from .data_sources import auto_report as src_auto
 
 # ─── Load .env ───────────────────────────────────────────────────────
 load_dotenv()
@@ -854,12 +876,401 @@ async def get_funding_check(
     }
 
 # ═══════════════════════════════════════════════════════════════════════
+# TOOL 17: get_tcfd_report
+# ═══════════════════════════════════════════════════════════════════════
+
+@mcp.tool(
+    name="get_tcfd_report",
+    description="Generates a TCFD-aligned climate report covering governance, "
+    "strategy, risk management, and metrics/targets for climate-related financial disclosures.",
+)
+async def get_tcfd_report(
+    company_name: str,
+    sector: str = "manufacturing",
+    revenue_eur_m: float = 0.0,
+    risk_score: int = 3,
+    flood_risk: int = 1,
+    heat_risk: int = 1,
+    drought_risk: int = 1,
+) -> dict[str, Any]:
+    """
+    Generate a TCFD-aligned climate report covering the four TCFD pillars:
+    governance, strategy, risk management, metrics and targets.
+    """
+    result = await asyncio.to_thread(
+        src_tcfd.get_tcfd_report,
+        company_name=company_name,
+        sector=sector,
+        revenue_eur_m=revenue_eur_m,
+        risk_score=risk_score,
+        flood_risk=flood_risk,
+        heat_risk=heat_risk,
+        drought_risk=drought_risk,
+    )
+    result["disclaimer"] = CSRD_DISCLAIMER
+    return result
+
+# ═══════════════════════════════════════════════════════════════════════
+# TOOL 18: get_tnfd_assessment
+# ═══════════════════════════════════════════════════════════════════════
+
+@mcp.tool(
+    name="get_tnfd_assessment",
+    description="Performs a TNFD-aligned LEAP (Locate, Evaluate, Assess, Prepare) "
+    "biodiversity and nature-related risk assessment for a company or portfolio.",
+)
+async def get_tnfd_assessment(
+    sector: str = "manufacturing",
+    regions: list[str] | None = None,
+    proximity_score: int = 3,
+) -> dict[str, Any]:
+    """
+    Perform a TNFD-aligned LEAP assessment for nature-related risks.
+    Covers Locate, Evaluate, Assess, and Prepare phases.
+    """
+    if regions is None:
+        regions = ["global"]
+    result = await asyncio.to_thread(
+        src_tnfd.get_tnfd_report,
+        sector=sector,
+        regions=regions,
+        proximity_score=proximity_score,
+    )
+    result["disclaimer"] = CSRD_DISCLAIMER
+    return result
+
+# ═══════════════════════════════════════════════════════════════════════
+# TOOL 19: check_sbti_target
+# ═══════════════════════════════════════════════════════════════════════
+
+@mcp.tool(
+    name="check_sbti_target",
+    description="Validates corporate emission reduction targets against "
+    "Science Based Targets initiative (SBTi) criteria and sector-specific pathways.",
+)
+async def check_sbti_target(
+    company_emissions: float,
+    sector: str = "manufacturing",
+    target_year: int = 2030,
+    base_year: int = 2020,
+    base_year_emissions: float = 0.0,
+    temperature_goal: str = "1.5c",
+) -> dict[str, Any]:
+    """
+    Validate corporate emission targets against SBTi criteria.
+    Checks if targets are aligned with Paris Agreement temperature goals.
+    """
+    result = await asyncio.to_thread(
+        src_sbti.check_sbti_target,
+        company_emissions=company_emissions,
+        sector=sector,
+        target_year=target_year,
+        base_year=base_year,
+        base_year_emissions=base_year_emissions,
+        temperature_goal=temperature_goal,
+    )
+    result["disclaimer"] = CSRD_DISCLAIMER
+    return result
+
+# ═══════════════════════════════════════════════════════════════════════
+# TOOL 20: calculate_cbam_obligation
+# ═══════════════════════════════════════════════════════════════════════
+
+@mcp.tool(
+    name="calculate_cbam_obligation",
+    description="Calculates CBAM (Carbon Border Adjustment Mechanism) "
+    "obligations for imported goods, including carbon cost and certificate requirements.",
+)
+async def calculate_cbam_obligation(
+    import_goods_tons: float,
+    embedded_emissions: float,
+    origin_country: str = "cn",
+    sector: str = "cement",
+    carbon_price_origin: float = 0.0,
+) -> dict[str, Any]:
+    """
+    Calculate CBAM obligations for imported goods.
+    Returns embedded emissions, certificate requirements, and total carbon cost.
+    """
+    result = await asyncio.to_thread(
+        src_cbam.calculate_cbam_obligation,
+        import_goods_tons=import_goods_tons,
+        embedded_emissions=embedded_emissions,
+        origin_country=origin_country,
+        sector=sector,
+        carbon_price_origin=carbon_price_origin,
+    )
+    result["disclaimer"] = CSRD_DISCLAIMER
+    return result
+
+# ═══════════════════════════════════════════════════════════════════════
+# TOOL 21: get_circular_economy_metrics
+# ═══════════════════════════════════════════════════════════════════════
+
+@mcp.tool(
+    name="get_circular_economy_metrics",
+    description="Assesses ESRS E5 circular economy performance including "
+    "waste management, recycling rates, and renewable material usage.",
+)
+async def get_circular_economy_metrics(
+    sector: str = "manufacturing",
+    revenue_eur_m: float = 0.0,
+    waste_tons: float = 0.0,
+    recycled_pct: float = 0.0,
+    renewable_material_pct: float = 0.0,
+) -> dict[str, Any]:
+    """
+    Assess circular economy metrics aligned with ESRS E5.
+    Evaluates waste, recycling, and renewable material circularity.
+    """
+    result = await src_e5.get_circular_economy_metrics(
+        sector=sector,
+        revenue_eur_m=revenue_eur_m,
+        waste_tons=waste_tons,
+        recycled_pct=recycled_pct,
+        renewable_material_pct=renewable_material_pct,
+    )
+    result["disclaimer"] = CSRD_DISCLAIMER
+    return result
+
+# ═══════════════════════════════════════════════════════════════════════
+# TOOL 22: get_social_sustainability
+# ═══════════════════════════════════════════════════════════════════════
+
+@mcp.tool(
+    name="get_social_sustainability",
+    description="Assesses ESRS S1-S4 social sustainability including workforce "
+    "indicators, turnover, injury rates, and gender pay equity.",
+)
+async def get_social_sustainability(
+    sector: str = "manufacturing",
+    employee_count: int = 0,
+    turnover_rate: float = 0.0,
+    injury_rate: float = 0.0,
+    gender_pay_gap: float = 0.0,
+) -> dict[str, Any]:
+    """
+    Assess social sustainability metrics aligned with ESRS S1-S4.
+    Covers workforce, value chain, affected communities, and consumers.
+    """
+    result = await src_social.get_social_sustainability_score(
+        sector=sector,
+        employee_count=employee_count,
+        turnover_rate=turnover_rate,
+        injury_rate=injury_rate,
+        gender_pay_gap=gender_pay_gap,
+    )
+    result["disclaimer"] = CSRD_DISCLAIMER
+    return result
+
+# ═══════════════════════════════════════════════════════════════════════
+# TOOL 23: get_csddd_assessment
+# ═══════════════════════════════════════════════════════════════════════
+
+@mcp.tool(
+    name="get_csddd_assessment",
+    description="Assesses CSDDD (Corporate Sustainability Due Diligence Directive) "
+    "supply chain human rights and environmental due diligence obligations.",
+)
+async def get_csddd_assessment(
+    sector: str = "manufacturing",
+    regions: list[str] | None = None,
+    revenue_eur_m: float = 0.0,
+) -> dict[str, Any]:
+    """
+    Assess CSDDD supply chain due diligence obligations.
+    Evaluates human rights and environmental risks across the supply chain.
+    """
+    if regions is None:
+        regions = ["eu"]
+    result = await src_csddd.get_csddd_due_diligence(
+        sector=sector,
+        regions=regions,
+        revenue_eur_m=revenue_eur_m,
+    )
+    result["disclaimer"] = CSRD_DISCLAIMER
+    return result
+
+# ═══════════════════════════════════════════════════════════════════════
+# TOOL 24: get_de_specific_assessment
+# ═══════════════════════════════════════════════════════════════════════
+
+@mcp.tool(
+    name="get_de_specific_assessment",
+    description="Germany-specific sustainability assessments: BISKO (municipal "
+    "carbon accounting), KSG (Climate Protection Act compliance), or LkSG "
+    "(Supply Chain Due Diligence Act).",
+)
+async def get_de_specific_assessment(
+    category: str = "bisko",
+    sector: str = "manufacturing",
+    energy_consumption_mwh: float = 0.0,
+    target_year: int = 2045,
+    reduction_pct: float = 0.0,
+    regions: list[str] | None = None,
+) -> dict[str, Any]:
+    """
+    Germany-specific sustainability assessment routing.
+    Supports BISKO (municipal carbon accounting), KSG (Climate Protection Act),
+    and LkSG (Supply Chain Due Diligence Act).
+    """
+    if regions is None:
+        regions = ["de"]
+    category = category.lower()
+    if category == "bisko":
+        result = await src_de.get_bisko_assessment(
+            sector=sector,
+            energy_consumption_mwh=energy_consumption_mwh,
+        )
+    elif category == "ksg":
+        result = await src_de.get_ksg_compliance(
+            sector=sector,
+            energy_consumption_mwh=energy_consumption_mwh,
+            target_year=target_year,
+            reduction_pct=reduction_pct,
+        )
+    elif category == "lksg":
+        result = await src_de.get_lksg_supply_chain_duty(
+            sector=sector,
+            regions=regions,
+        )
+    else:
+        result = {"error": f"Unknown category '{category}'. Use 'bisko', 'ksg', or 'lksg'."}
+    result["disclaimer"] = CSRD_DISCLAIMER
+    return result
+
+# ═══════════════════════════════════════════════════════════════════════
+# TOOL 25: get_esg_rating
+# ═══════════════════════════════════════════════════════════════════════
+
+@mcp.tool(
+    name="get_esg_rating",
+    description="Simulates ESG ratings using MSCI and/or Sustainalytics "
+    "methodologies based on sector, emissions intensity, and risk profile.",
+)
+async def get_esg_rating(
+    sector: str = "manufacturing",
+    emissions_intensity: float = 0.0,
+    risk_score: int = 3,
+    methodology: str = "both",
+) -> dict[str, Any]:
+    """
+    Simulate ESG ratings using MSCI and/or Sustainalytics methodologies.
+    Returns rating scores, category labels, and improvement recommendations.
+    """
+    result = {}
+    methodology = methodology.lower()
+    if methodology in ("msci", "both"):
+        msci_result = await asyncio.to_thread(
+            src_esg.simulate_msci_rating,
+            sector=sector,
+            emissions_intensity=emissions_intensity,
+            risk_score=risk_score,
+        )
+        result["msci"] = msci_result
+    if methodology in ("sustainalytics", "both"):
+        sust_result = await asyncio.to_thread(
+            src_esg.simulate_sustainalytics_rating,
+            sector=sector,
+            emissions_intensity=emissions_intensity,
+            risk_score=risk_score,
+        )
+        result["sustainalytics"] = sust_result
+    result["methodology"] = methodology
+    result["disclaimer"] = CSRD_DISCLAIMER
+    return result
+
+# ═══════════════════════════════════════════════════════════════════════
+# TOOL 26: get_real_estate_assessment
+# ═══════════════════════════════════════════════════════════════════════
+
+@mcp.tool(
+    name="get_real_estate_assessment",
+    description="Real estate sustainability assessment: energy performance "
+    "certificates, renovation roadmaps, KfW efficiency house, or EPC benchmarks.",
+)
+async def get_real_estate_assessment(
+    category: str = "energy_cert",
+    building_type: str = "office",
+    country: str = "de",
+    current_class: str = "d",
+    target_class: str = "a",
+    efficiency_class: str = "kfw_55",
+) -> dict[str, Any]:
+    """
+    Real estate sustainability assessment routing.
+    Supports energy certificates, renovation roadmaps, KfW efficiency house, and EPC benchmarks.
+    """
+    category = category.lower()
+    if category == "energy_cert":
+        result = await src_re.get_energy_certificate(
+            building_type=building_type,
+            country=country,
+            current_class=current_class,
+        )
+    elif category == "renovation_roadmap":
+        result = await src_re.get_renovation_roadmap(
+            building_type=building_type,
+            country=country,
+            current_class=current_class,
+            target_class=target_class,
+        )
+    elif category == "kfw":
+        result = await src_re.get_kfw_efficiency_house(
+            building_type=building_type,
+            efficiency_class=efficiency_class,
+        )
+    elif category == "epc_benchmarks":
+        result = await src_re.get_epc_benchmarks(
+            building_type=building_type,
+            country=country,
+        )
+    else:
+        result = {
+            "error": f"Unknown category '{category}'. Use 'energy_cert', 'renovation_roadmap', 'kfw', or 'epc_benchmarks'."
+        }
+    result["disclaimer"] = CSRD_DISCLAIMER
+    return result
+
+# ═══════════════════════════════════════════════════════════════════════
+# TOOL 27: generate_full_report_package
+# ═══════════════════════════════════════════════════════════════════════
+
+@mcp.tool(
+    name="generate_full_report_package",
+    description="Generates a complete CSRD reporting package including "
+    "climate risk, ESRS materiality, emission benchmarks, and executive summary.",
+)
+async def generate_full_report_package(
+    site_lat: float,
+    site_lon: float,
+    company_name: str = "Example GmbH",
+    sector: str = "manufacturing",
+    employees: int = 500,
+    revenue: float = 100.0,
+) -> dict[str, Any]:
+    """
+    Generate a complete CSRD reporting package combining climate risk analysis,
+    ESRS applicability, emission benchmarks, and an executive summary.
+    """
+    result = await src_auto.generate_full_report_package(
+        site_lat=site_lat,
+        site_lon=site_lon,
+        company_name=company_name,
+        sector=sector,
+        employees=employees,
+        revenue=revenue,
+    )
+    result["disclaimer"] = CSRD_DISCLAIMER
+    return result
+
+# ═══════════════════════════════════════════════════════════════════════
 # ENTRY POINT
 # ═══════════════════════════════════════════════════════════════════════
 
 def main():
     """Run the MCP server over stdio."""
-    logger.info("Starting Climate CSRD MCP Server v2.1.0 (16 tools)")
+    logger.info("Starting Climate CSRD MCP Server v2.0.0 (27 tools)")
     mcp.run(transport="stdio")
 
 
